@@ -1,0 +1,12 @@
+{
+  "apiBase": "http://YOUR_COMPANY_API:PORT",
+  "sourceBase": "http://YOUR_COMPANY_WEB:PORT",
+  "loginToken": "REQUEST_FROM_YOUR_SYSTEM_ADMIN",
+  "port": 4173,
+  "maxPages": 50,
+  "language": "zh-cn",
+  "materialGroups": {
+    "front": ["FRONT_PRIMARY", "FRONT_SECONDARY"],
+    "rear": ["REAR_PRIMARY", "REAR_SECONDARY"]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "gongyi-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "工艺部本地业务门户",
+  "scripts": { "start": "node server.cjs", "test": "node --test test/*.test.cjs" },
+  "engines": { "node": ">=22" }
+}
