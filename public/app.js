@@ -8,7 +8,7 @@
     alarm: {title:'安灯报警',description:'按日期和关键词读取报警记录，状态以原系统字段为准。',notice:'查询结果反映报警记录，不直接代表设备当前运行状态；没有记录也不等于设备正常。'},
     spares: {title:'定位销与伸缩气缸管理',description:'重点备件查询、库存快照与入库清单校验。',notice:'这里展示最近成功读取的库存快照，不按日期筛选历史库存。清单校验不会写入库存，真实入库提交尚未开放。'}
   };
-  const state = {status:null,connected:false,module:'weld',view:'weekly',part:'front',page:1,size:50,result:null,error:'',loading:false,request:null,polling:false,interval:30,timer:null,cache:new Map(),statusLoading:false};
+  const state = {status:null,authenticated:false,connected:false,module:'weld',view:'weekly',part:'front',page:1,size:50,result:null,error:'',loading:false,request:null,polling:false,interval:30,timer:null,cache:new Map(),statusLoading:false};
   let toastTimer;
   const importState={result:null,controller:null,revision:0};
   function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
@@ -42,19 +42,19 @@
     if(typeof value!=='string'||!value)return null;try{const url=new URL(value,location.href);return ['http:','https:'].includes(url.protocol)?url.href:null;}catch(_){return null;}
   }
   function renderConnection(){
-    $('#appShell').hidden=!state.connected;$('#loginScreen').hidden=state.connected;document.body.classList.toggle('logged-out',!state.connected);
-    $('#connectionBadge').textContent=state.connected?'业务系统已连接':state.statusLoading?'检查连接中':'尚未连接';$('#connectionBadge').classList.toggle('connected',state.connected);
-    $('#loginButton').hidden=state.connected;$('#logoutButton').hidden=!state.connected;$('#connectionPrompt').hidden=state.connected;
-    $('#accountLabel').textContent=state.connected?(state.status.account?`当前连接：${state.status.account}`:'当前连接已建立'):'尚未连接';
+    $('#appShell').hidden=!state.authenticated;$('#loginScreen').hidden=state.authenticated;document.body.classList.toggle('logged-out',!state.authenticated);
+    $('#connectionBadge').textContent=state.connected?'公司数据已连接':state.statusLoading?'检查连接中':'公司数据未连接';$('#connectionBadge').classList.toggle('connected',state.connected);
+    $('#loginButton').hidden=state.connected;$('#logoutButton').hidden=!state.authenticated;$('#connectionPrompt').hidden=state.connected;
+    $('#accountLabel').textContent=state.authenticated?`门户：${state.status?.account||'已登录'}${state.status?.role==='admin'?' · 管理员':''}${state.connected&&state.status?.sourceAccount?'；数据：'+state.status.sourceAccount:''}`:'尚未登录';
     $('#queryButton').disabled=!state.connected||state.loading;$('#refreshButton').disabled=!state.connected||state.loading;
-    $('#previewImport').disabled=!state.connected||!validImportFile($('#importFile').files[0])||Boolean(importState.controller);
+    $('#previewImport').disabled=!state.authenticated||!validImportFile($('#importFile').files[0])||Boolean(importState.controller);
     const source=safeSourceUrl();$('#sourceLink').hidden=!source;if(source)$('#sourceLink').href=source;
     renderPolling();
   }
   async function checkStatus({read=false}={}){
     if(state.statusLoading)return;state.statusLoading=true;renderConnection();
-    try{const status=await api('/local/status');state.status=status;state.connected=Boolean(status.connected);$('#connectionBadge').classList.remove('error');if(!state.connected)stopPolling();if(read&&state.connected){if(state.module==='weld'&&state.view==='live')state.polling=true;await loadData('initial');}}
-    catch(error){state.connected=false;stopPolling();$('#connectionBadge').classList.add('error');state.error=`连接状态读取失败：${errorText(error)}`;$('#loginError').textContent=state.error;$('#loginError').hidden=false;renderResult();}
+    try{const status=await api('/local/status');state.status=status;state.authenticated=Boolean(status.authenticated);state.connected=state.authenticated&&Boolean(status.connected);$('#connectionBadge').classList.remove('error');if(!state.connected)stopPolling();if(read&&state.connected){if(state.module==='weld'&&state.view==='live')state.polling=true;await loadData('initial');}else renderResult();}
+    catch(error){state.connected=false;if(error.status===401)state.authenticated=false;stopPolling();$('#connectionBadge').classList.add('error');state.error=`连接状态读取失败：${errorText(error)}`;$('#loginError').textContent=state.error;$('#loginError').hidden=false;renderResult();}
     finally{state.statusLoading=false;renderConnection();}
   }
   function querySnapshot(){
@@ -78,7 +78,8 @@
     }catch(error){
       if(state.request!==request)return;if(error.name==='AbortError'&&!request.timedOut)return;
       state.error=request.timedOut?'读取超时，请稍后重试。':errorText(error);
-      if(error.status===401){state.connected=false;stopPolling();state.error='登录已过期，请重新登录。';$('#passwordInput').value='';$('#loginError').textContent=state.error;$('#loginError').hidden=false;}
+      if(error.status===401){state.authenticated=false;state.connected=false;stopPolling();state.error='门户登录已过期，请重新登录管理员账号。';$('#passwordInput').value='';$('#loginError').textContent=state.error;$('#loginError').hidden=false;}
+      else if(error.status===428){state.connected=false;stopPolling();state.error='公司数据连接已过期，请重新连接公司数据。门户登录仍然有效。';}
       else if(error.status===403){stopPolling();state.error='当前账号没有读取此模块的权限，自动刷新已停止。请向系统管理员核对权限。';}
     }finally{
       clearTimeout(request.timeout);if(state.request===request){state.request=null;state.loading=false;renderConnection();renderResult();schedulePolling();}
@@ -118,12 +119,12 @@
     if(state.error){status.classList.add('error');status.textContent=`读取失败：${state.error}${result?' 当前保留上次成功数据（'+scopeText(result.query)+'）。':' 尚无成功数据可显示。'}`;}
     else if(state.loading){status.classList.add('loading');status.textContent=result?'正在读取当前条件，暂时显示上次成功数据。':'正在读取真实接口，请稍候…';}
     else if(result){status.classList.add('success');status.textContent=`已成功读取本页 ${data.rows.length} 条记录。${data.note?' '+data.note:''}`;}
-    else status.textContent=state.connected?'已连接，尚未读取当前模块。':'尚未读取数据，请先连接业务系统。';
+    else status.textContent=state.connected?'已连接，尚未读取当前模块。':'尚未读取数据，请先连接公司数据。';
     $('#recordTotal').textContent=data?numberText(countValue(data.total)):'—';
     $('#totalCaption').textContent=data?`当前条件下实际已读取的记录${countValue(data.sourceTotal)!==null?'；来源报告总量 '+numberText(countValue(data.sourceTotal))+' 条':''}${state.module==='weld'?'。不等于补焊点数或去重件数。':''}`:'等待真实接口返回';
     $('#lastSuccess').textContent=result?dateTime(result.successAt):'—';$('#sourceTime').textContent=data?dateTime(data.sourceTime):'—';
     $('#completeness').textContent=!data?'完整性尚未核实':data.complete===true?'分页条数已核对（截至本次读取）':data.complete===false?'数据可能不完整，请结合读取提示核对':'接口未确认完整性';
-    $('#dataTable').className=data?'':'empty-state';$('#dataTable').innerHTML=data?renderTable(data):(state.connected?'当前模块尚无成功读取结果。':'连接业务系统后，点击查询读取真实记录。');
+    $('#dataTable').className=data?'':'empty-state';$('#dataTable').innerHTML=data?renderTable(data):(state.connected?'当前模块尚无成功读取结果。':'连接公司数据后，点击查询读取真实记录。');
     $('#resultScope').textContent=result?`当前展示：${scopeText(result.query)}${state.module==='weld'?' · 明细包含日期范围内全部料号；前副 / 后副切换仅作用于统计区。':''}`:'查询后展示接口字段。';
     const page=data?Number(data.page)||result.query.page:state.page,size=data?Number(data.size)||result.query.size:state.size,total=data?countValue(data.total):null,pages=total!==null?Math.max(1,Math.ceil(total/size)):null;
     $('#pageSummary').textContent=data?`本页 ${data.rows.length} 条${Number.isFinite(total)?' / 共 '+total.toLocaleString('zh-CN')+' 条':''}`:'尚未读取';$('#pageNumber').textContent=data?`${page}${pages?' / '+pages:''}`:'—';
@@ -142,13 +143,13 @@
   }
   function switchModule(){const id=location.hash.slice(1);cancelRequest();stopPolling();if(id==='weld-live'){state.module='weld';state.view='live';}else if(id==='alarm'||id==='spares'){state.module=id;}else{state.module='weld';state.view='weekly';}state.page=1;state.result=state.cache.get(cacheKey())||null;state.error='';$('#keywordInput').value='';$('#categoryFilter').value='all';resetDates();closeNav();if(state.connected&&state.module==='weld'&&state.view==='live')state.polling=true;renderModule();if(state.connected)loadData('route');}
   function queryChanged(){cancelRequest();clearTimer();state.page=1;loadData('filter');}
-  function openLogin(){state.connected=false;stopPolling();cancelRequest();renderConnection();$('#passwordInput').value='';$('#usernameInput').focus();}
+  function openSourceConnection(){if(!state.authenticated)return;$('#sourceConnectError').hidden=true;$('#sourcePasswordInput').value='';if(!$('#connectionDialog').open)$('#connectionDialog').showModal();$('#sourceUsernameInput').focus();}
 
   function validImportFile(file){return Boolean(file&&/\.csv$/i.test(file.name)&&file.size>0&&file.size<=1024*1024);}
   function resetImport(message='选择文件后点击“预览校验”。文件仅交给本地服务检查，不会提交入库。'){
     importState.revision++;if(importState.controller)importState.controller.abort();importState.controller=null;importState.result=null;
     $('#downloadPrepared').disabled=true;$('#previewImport').textContent='预览校验';$('#importPreview').className='empty-state compact';$('#importPreview').textContent=message;
-    $('#previewImport').disabled=!state.connected||!validImportFile($('#importFile').files[0]);
+    $('#previewImport').disabled=!state.authenticated||!validImportFile($('#importFile').files[0]);
   }
   function renderImport(result){
     const errors=Array.isArray(result.errors)?result.errors:[],warnings=Array.isArray(result.warnings)?result.warnings:[],rows=Array.isArray(result.rows)?result.rows:[];
@@ -158,12 +159,12 @@
     $('#downloadPrepared').disabled=!(result.valid===true&&rows.length>0&&rows.every(row=>row.valid));
   }
   async function previewImport(){
-    const file=$('#importFile').files[0];if(!state.connected||!validImportFile(file)||importState.controller)return;
+    const file=$('#importFile').files[0];if(!state.authenticated||!validImportFile(file)||importState.controller)return;
     resetImport('正在读取并校验所选清单…');const revision=importState.revision,controller=new AbortController();importState.controller=controller;
     $('#previewImport').disabled=true;$('#previewImport').textContent='正在校验…';
     try{const content=await file.text();if(revision!==importState.revision)return;const result=await api('/local/import-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,content}),signal:controller.signal});if(revision!==importState.revision)return;if(!Array.isArray(result.rows))throw new Error('校验结果格式不符合约定，请检查本地服务。');importState.result=result;renderImport(result);}
-    catch(error){if(revision!==importState.revision)return;$('#importPreview').className='empty-state compact validation-error';$('#importPreview').textContent='校验失败：'+errorText(error);if(error.status===401){state.connected=false;stopPolling();cancelRequest();$('#loginError').textContent='登录已过期，请重新登录后校验文件。';$('#loginError').hidden=false;renderConnection();}}
-    finally{if(revision===importState.revision){importState.controller=null;$('#previewImport').textContent='预览校验';$('#previewImport').disabled=!state.connected||!validImportFile($('#importFile').files[0]);}}
+    catch(error){if(revision!==importState.revision)return;$('#importPreview').className='empty-state compact validation-error';$('#importPreview').textContent='校验失败：'+errorText(error);if(error.status===401){state.authenticated=false;state.connected=false;stopPolling();cancelRequest();$('#loginError').textContent='门户登录已过期，请重新登录后校验文件。';$('#loginError').hidden=false;renderConnection();}}
+    finally{if(revision===importState.revision){importState.controller=null;$('#previewImport').textContent='预览校验';$('#previewImport').disabled=!state.authenticated||!validImportFile($('#importFile').files[0]);}}
   }
   function downloadPrepared(){
     const result=importState.result;if(!result?.valid||!Array.isArray(result.rows)||!result.rows.length||result.rows.some(row=>!row.valid))return;
@@ -174,15 +175,17 @@
 
   $('#menuButton').addEventListener('click',()=>{const open=!document.body.classList.contains('nav-open');document.body.classList.toggle('nav-open',open);$('#menuButton').setAttribute('aria-expanded',String(open));$('#navBackdrop').hidden=!open;});
   $('#navBackdrop').addEventListener('click',closeNav);document.addEventListener('keydown',event=>{if(event.key==='Escape')closeNav();});
-  $('#loginButton').addEventListener('click',openLogin);$('#connectPromptButton').addEventListener('click',openLogin);
+  $('#loginButton').addEventListener('click',openSourceConnection);$('#connectPromptButton').addEventListener('click',openSourceConnection);
+  $('#closeConnectionDialog').addEventListener('click',()=>$('#connectionDialog').close());$('#connectionDialog').addEventListener('close',()=>{$('#sourcePasswordInput').value='';});
   $('#loginForm').addEventListener('submit',async event=>{
     event.preventDefault();const username=$('#usernameInput').value.trim(),password=$('#passwordInput').value;if(!username||!password)return;
     $('#loginSubmit').disabled=true;$('#loginError').hidden=true;
-    try{const pending=api('/local/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});$('#passwordInput').value='';await pending;await checkStatus();if(!state.connected)throw new Error('登录请求已返回，但尚未确认连接，请检查账号或本地服务。');$('#usernameInput').value='';state.cache.clear();state.result=null;state.error='';$('#importFile').value='';resetImport();if(state.module==='weld'&&state.view==='live')state.polling=true;renderConnection();await loadData('login');}
+    try{const pending=api('/local/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});$('#passwordInput').value='';await pending;await checkStatus();if(!state.authenticated)throw new Error('尚未确认门户登录，请检查管理员账号或本地服务。');$('#usernameInput').value='';state.cache.clear();state.result=null;state.error='';$('#importFile').value='';resetImport();if(state.connected&&state.module==='weld'&&state.view==='live')state.polling=true;renderConnection();renderResult();if(state.connected)await loadData('login');}
     catch(error){$('#loginError').hidden=false;$('#loginError').textContent=errorText(error);}
     finally{$('#passwordInput').value='';$('#loginSubmit').disabled=false;}
   });
-  $('#logoutButton').addEventListener('click',async()=>{stopPolling();cancelRequest();$('#logoutButton').disabled=true;try{await api('/local/logout',{method:'POST'});state.connected=false;state.status=null;state.result=null;state.cache.clear();state.error='';$('#usernameInput').value='';$('#passwordInput').value='';$('#importFile').value='';resetImport();renderConnection();renderResult();notify('已退出连接并清除当前页面的数据。');}catch(error){notify('退出请求失败：'+errorText(error));}finally{$('#logoutButton').disabled=false;}});
+  $('#connectionForm').addEventListener('submit',async event=>{event.preventDefault();const username=$('#sourceUsernameInput').value.trim(),password=$('#sourcePasswordInput').value;if(!username||!password||!state.authenticated)return;$('#sourceConnectSubmit').disabled=true;$('#sourceConnectError').hidden=true;try{const pending=api('/local/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});$('#sourcePasswordInput').value='';await pending;await checkStatus();if(!state.authenticated)throw new Error('门户登录已过期，请重新登录管理员账号。');if(!state.connected)throw new Error('尚未确认公司数据连接，请检查账号权限或本地服务。');$('#sourceUsernameInput').value='';$('#connectionDialog').close();state.cache.clear();state.result=null;state.error='';if(state.module==='weld'&&state.view==='live')state.polling=true;renderConnection();await loadData('connect');}catch(error){if(error.status===401)await checkStatus();if(!state.authenticated){$('#connectionDialog').close();$('#loginError').textContent='门户登录已过期，请重新登录管理员账号。';$('#loginError').hidden=false;}else{$('#sourceConnectError').textContent=errorText(error);$('#sourceConnectError').hidden=false;}}finally{$('#sourcePasswordInput').value='';$('#sourceConnectSubmit').disabled=false;}});
+  $('#logoutButton').addEventListener('click',async()=>{stopPolling();cancelRequest();$('#logoutButton').disabled=true;try{await api('/local/logout',{method:'POST'});state.authenticated=false;state.connected=false;state.status=null;state.result=null;state.cache.clear();state.error='';$('#usernameInput').value='';$('#passwordInput').value='';$('#sourceUsernameInput').value='';$('#sourcePasswordInput').value='';$('#connectionDialog').close();$('#importFile').value='';resetImport();renderConnection();renderResult();notify('已退出门户并清除当前页面的数据。');}catch(error){notify('退出请求失败：'+errorText(error));}finally{$('#logoutButton').disabled=false;}});
   $('#queryForm').addEventListener('submit',event=>{event.preventDefault();queryChanged();});$('#refreshButton').addEventListener('click',()=>loadData('manual'));
   $('#rangeMode').addEventListener('change',syncDateFields);$('#categoryFilter').addEventListener('change',queryChanged);
   $('#pageSize').addEventListener('change',()=>{state.size=Number($('#pageSize').value);queryChanged();});

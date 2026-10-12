@@ -4,7 +4,7 @@
   "loginToken": "REQUEST_FROM_YOUR_SYSTEM_ADMIN",
   "port": 4173,
   "maxPages": 50,
-  "language": "zh-cn",
+  "language": "0",
   "materialGroups": {
     "front": ["FRONT_PRIMARY", "FRONT_SECONDARY"],
     "rear": ["REAR_PRIMARY", "REAR_SECONDARY"]
