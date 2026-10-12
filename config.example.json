@@ -8,5 +8,10 @@
   "materialGroups": {
     "front": ["FRONT_PRIMARY", "FRONT_SECONDARY"],
     "rear": ["REAR_PRIMARY", "REAR_SECONDARY"]
-  }
+  },
+  "weldLineFields": ["productionLine", "lineName", "line"],
+  "weldLineRules": [],
+  "alarmDepartmentRules": [],
+  "alarmDepartments": [],
+  "alarmLineRules": []
 }

@@ -151,3 +151,222 @@ test('historical scopes and partial weeks suppress comparison; legacy KW is not 
   ] });
   assert.equal(full.at(-1).products.front.comparison.reason, 'scope_not_comparable');
 });
+
+test('dashboard defaults to all materials, lines and defects, including missing values', () => {
+  const rows = [
+    row(), row({ '物料编码': 'REAR_PRIMARY', '缺陷内容': '咬边', productionLine: '21线' }),
+    row({ '物料编码': 'SYN-OTHER', '缺陷内容': '', productionLine: '试制A线' }),
+    row({ '物料编码': '', '二维码': 'unrecognized', '缺陷内容': '外观待判' })
+  ];
+  const result = weld.buildWeldDashboard(rows, period);
+  assert.deepEqual(result.selected, { product: 'all', line: 'all', defects: [] });
+  assert.equal(result.overview.recordCount, 4);
+  assert.equal(result.overview.pieceCount, 3);
+  assert.equal(result.overview.materialCount, 3);
+  assert.equal(result.overview.lineCount, 3);
+  assert.equal(result.overview.defectTypeCount, 4);
+  assert.equal(result.overview.unknownLineCount, 1);
+  assert.deepEqual(result.filteredRows, rows);
+  assert.ok(result.defectSummary.some(item => item.defect === '未填写' && item.recordCount === 1));
+  assert.ok(result.lineSummary.some(item => item.line === '待识别线体' && item.recordCount === 1));
+  assert.equal(result.options.products.find(item => item.value === 'other').count, 2);
+  assert.equal(result.source.complete, null);
+  assert.ok(result.notes.some(note => note.includes('不等于一个已经完成的补焊点')));
+});
+
+test('dashboard involved pieces use material plus QR while duplicate source logs remain', () => {
+  const rows = [row(), row(), row({ '物料编码': 'FRONT_SECONDARY' }),
+    row({ '物料编码': 'REAR_PRIMARY' }), row({ '二维码': '' }), row({ '物料编码': '' })];
+  const result = weld.buildWeldDashboard(rows, period);
+  assert.equal(result.overview.recordCount, 6);
+  assert.equal(result.overview.pieceCount, 3);
+  assert.equal(result.overview.recordsPerPiece, 2);
+  assert.equal(result.overview.duplicateRowsRetained, 1);
+  assert.equal(result.diagnostics.missingPieceKeyRows, 2);
+  assert.equal(result.diagnostics.missingQrRows, 1);
+  assert.equal(result.diagnostics.missingMaterialRows, 1);
+  assert.equal(weld.buildWeldDashboard([row({ '二维码': '' })], period).overview.recordsPerPiece, null);
+  assert.equal(weld.buildWeldReport(rows, period).products.front.pieces, 1, 'legacy composite-group QR dedupe remains unchanged');
+});
+
+test('dashboard explicit production line fields take priority and retain conflict evidence', () => {
+  const result = weld.buildWeldDashboard([
+    row({ productionLine: '21', lineName: '22线', line: '23线' }),
+    row({ productionLine: ' ', lineName: '装配A线', line: '装配A线' }),
+    row({ '二维码': 'unsupported-qr', line: '研制B线' })
+  ], period);
+  assert.deepEqual(new Set(result.lineSummary.map(item => item.line)), new Set(['21线', '装配A线', '研制B线']));
+  assert.equal(result.diagnostics.explicitLineConflicts, 1);
+  assert.equal(result.diagnostics.qrFieldConflicts, 2);
+  assert.deepEqual(result.diagnostics.lineSources, { explicit: 3, rule: 0, legacyQr: 0, unknown: 0 });
+});
+
+test('dashboard QR fallback never generalizes the verified suffix to arbitrary line numbers', () => {
+  const rows = [row({ '二维码': 'DEMO21A001' }), row({ '二维码': 'DEMO11A001' }),
+    row({ '二维码': 'DEMO999A001', '备注': '21线' }), row({ '二维码': 'DEMO12A001suffix' })];
+  const result = weld.buildWeldDashboard(rows, period);
+  assert.equal(result.lineSummary.find(item => item.line === '待识别线体').recordCount, 3);
+  assert.equal(result.lineSummary.find(item => item.line === '11线').recordCount, 1);
+  assert.equal(result.diagnostics.lineSources.legacyQr, 1);
+  assert.equal(weld.buildWeldDashboard(rows, { ...period, allowLegacyQr: false }).overview.unknownLineCount, 4);
+  const other = weld.buildWeldDashboard([row({ '物料编码': 'SYN-OTHER' }), row()], {
+    ...period, materialGroups: { front: ['SYN-F1'], rear: ['SYN-R1'] }
+  });
+  assert.equal(other.overview.unknownLineCount, 2, 'matching QR suffix alone is insufficient outside configured product materials');
+  const configured = weld.buildWeldDashboard([row({ '物料编码': 'SYN-F1' })], {
+    ...period, materialGroups: { front: ['SYN-F1'], rear: ['SYN-R1'] }
+  });
+  assert.equal(configured.lineSummary[0].line, '11线');
+});
+
+test('dashboard configured line rules handle verified new formats and conflicting rules stay unknown', () => {
+  const rows = [row({ '二维码': 'SYN-L21-A001' }), row({ '二维码': 'SYN-L22-A002' }),
+    row({ '二维码': 'SYN-L21-A003', productionLine: '明确线体' }), row({ '二维码': 'OTHER-L21-A001' })];
+  const rule = { id: 'synthetic-line-format', field: 'qr', pattern: '^SYN-L(21|22)-[A-Z][0-9]{3}$', group: 1, suffix: '线' };
+  const result = weld.buildWeldDashboard(rows, { ...period, lineRules: [rule] });
+  assert.deepEqual(new Set(result.lineSummary.map(item => item.line)), new Set(['21线', '22线', '明确线体', '待识别线体']));
+  assert.equal(result.diagnostics.lineSources.rule, 2);
+  const conflict = weld.buildWeldDashboard([rows[0]], { ...period, lineRules: [rule, { field: 'qr', pattern: '^SYN-', line: '另一线' }] });
+  assert.equal(conflict.overview.unknownLineCount, 1);
+  assert.equal(conflict.diagnostics.lineRuleConflicts, 1);
+});
+
+test('dashboard filters reconcile list, totals, charts, Top5 and date buckets under one scope', () => {
+  const rows = [
+    row({ id: 'a', productionLine: '21线', '缺陷内容': '咬边' }),
+    row({ id: 'b', productionLine: '21线', '缺陷内容': '', '录入时间': '2026-10-13 09:00:00' }),
+    row({ id: 'c', productionLine: '22线', '缺陷内容': '咬边' }),
+    row({ id: 'd', productionLine: '21线', '缺陷内容': '焊偏' }),
+    row({ id: 'e', productionLine: '21线', '缺陷内容': '咬边', '物料编码': 'REAR_PRIMARY' }),
+    row({ id: 'f', productionLine: '21线', '缺陷内容': '咬边', '录入时间': '2026-10-19 09:00:00' })
+  ];
+  const result = weld.buildWeldDashboard(rows, { ...period, product: 'front', line: '21线', defects: ['咬边', '未填写'] });
+  assert.deepEqual(result.filteredRows.map(item => item.id), ['a', 'b']);
+  assert.equal(result.overview.recordCount, 2);
+  for (const series of [result.lineSummary, result.defectSummary, result.topLocations, result.dailyTrend, result.trend]) {
+    assert.equal(series.reduce((sum, item) => sum + (item.recordCount || 0), 0), 2);
+  }
+  for (const top of result.topLocations) {
+    assert.equal(top.byLine.reduce((sum, item) => sum + item.count, 0), top.recordCount);
+    assert.equal(top.byDefect.reduce((sum, item) => sum + item.count, 0), top.recordCount);
+  }
+  assert.equal(result.options.lines.find(item => item.value === '22线').count, 1, 'filter menus retain alternatives within the period');
+  assert.equal(result.options.products.find(item => item.value === 'all').count, 5);
+  assert.equal(result.options.products.find(item => item.value === 'rear').count, 1);
+  assert.equal(result.diagnostics.outsidePeriodRows, 1);
+  const keyword = weld.buildWeldDashboard(rows, { ...period, keyword: 'REAR_PRIMARY' });
+  assert.deepEqual(keyword.filteredRows.map(item => item.id), ['e']);
+  assert.equal(keyword.overview.recordCount, 1);
+  assert.equal(keyword.lineSummary[0].recordCount, 1);
+  assert.equal(keyword.topLocations[0].recordCount, 1);
+});
+
+test('dashboard missing field/date buckets remain visible by default but date filters explicitly exclude undated records', () => {
+  const rows = [row(), row({ id: 'missing', '录入时间': '', '缺陷内容': '', '缺陷位置': '', '二维码': '', '物料编码': '' }),
+    row({ id: 'invalid', '录入时间': '2026-02-30 09:00:00' })];
+  const all = weld.buildWeldDashboard(rows);
+  assert.equal(all.overview.recordCount, 3);
+  assert.equal(all.dailyTrend.find(item => item.date === null).recordCount, 2);
+  assert.equal(all.diagnostics.missingDateRows, 1);
+  assert.equal(all.diagnostics.invalidDateRows, 1);
+  assert.equal(all.diagnostics.filteredMissingFields.defect, 1);
+  assert.equal(all.diagnostics.filteredMissingFields.location, 1);
+  assert.ok(all.topLocations.some(item => item.location === '未填写位置' && item.recordCount === 1));
+  const bounded = weld.buildWeldDashboard(rows, period);
+  assert.equal(bounded.overview.recordCount, 1);
+  assert.equal(bounded.diagnostics.undatedRowsExcludedByDateFilter, 2);
+  assert.equal(bounded.diagnostics.outsidePeriodRows, 0);
+  assert.ok(bounded.dailyTrend.every(item => item.date));
+});
+
+test('dashboard custom material groups and field paths preserve source rows and material names', () => {
+  const rows = [{ data: { material: 'SYN-F1', materialName: '虚构零件甲', qr: 'SYN-QR-1', defect: '示例缺陷', line: '试制C线', date: '2026-10-12', place: '示例位置' } },
+    { data: { material: 'SYN-X1', materialName: '虚构零件乙', qr: 'SYN-QR-2', defect: '另一缺陷', line: '试制D线', date: '2026-10-12', place: '另一位置' } }];
+  const before = JSON.stringify(rows);
+  const result = weld.buildWeldDashboard(rows, { ...period, product: 'front', source: 'synthetic-source', sourceComplete: false,
+    materialGroups: { front: ['SYN-F1'], rear: ['SYN-R1'] }, fieldMap: {
+      material: 'data.material', materialName: 'data.materialName', qr: 'data.qr', defect: 'data.defect',
+      recordedAt: 'data.date', location: 'data.place', productionLine: input => input.data.line
+    } });
+  assert.equal(result.overview.recordCount, 1);
+  assert.equal(result.lineSummary[0].line, '试制C线');
+  assert.equal(result.materialSummary[0].materialName, '虚构零件甲');
+  assert.equal(result.options.products.find(item => item.value === 'other').count, 1);
+  assert.equal(result.filteredRows[0], rows[0]);
+  assert.equal(result.source.label, 'synthetic-source');
+  assert.equal(result.source.complete, false);
+  assert.equal(JSON.stringify(rows), before);
+});
+
+test('dashboard absent days/weeks remain null unless caller proves full coverage', () => {
+  const unknown = weld.buildWeldDashboard([row()], period);
+  assert.equal(unknown.dailyTrend[0].recordCount, 1);
+  assert.equal(unknown.dailyTrend[0].coverageStatus, 'unknown');
+  assert.equal(unknown.dailyTrend[1].recordCount, null);
+  assert.equal(unknown.trend[0].recordCount, null);
+  assert.equal(unknown.trend[0].coverageStatus, 'missing');
+  const known = weld.buildWeldDashboard([row()], { ...period, sourceComplete: true, coverage: [{ ...period, complete: true }] });
+  assert.equal(known.dailyTrend[1].recordCount, 0);
+  assert.equal(known.dailyTrend[1].pieceCount, 0);
+  assert.equal(known.dailyTrend[1].recordsPerPiece, null);
+  assert.equal(known.trend.at(-1).complete, true);
+  assert.equal(known.trend[0].recordCount, null, 'no coverage evidence outside the selected period');
+  assert.equal(known.source.complete, true);
+});
+
+test('dashboard partial selected week cannot inherit whole-week coverage and accepts caller week labels', () => {
+  const result = weld.buildWeldDashboard([row()], { startDate: '2026-10-12', endDate: '2026-10-13',
+    coverage: [{ ...period, complete: true }], weekLabel: (start, end) => `${start} 至 ${end}` });
+  assert.equal(result.period.coverage.status, 'complete');
+  assert.equal(result.trend.at(-1).coverageStatus, 'partial');
+  assert.equal(result.trend.at(-1).complete, false);
+  assert.equal(result.trend.at(-1).label, '2026-10-12 至 2026-10-18');
+  assert.equal(result.trend.at(-1).recordCount, 1);
+});
+
+test('dashboard validates filters, preserves empty output, and supports unknown/blank selection', () => {
+  assert.throws(() => weld.buildWeldDashboard([], { product: 'unsupported' }), /product filter/);
+  assert.throws(() => weld.buildWeldDashboard([], { defects: '咬边' }), /array/);
+  assert.throws(() => weld.buildWeldDashboard([], { weekCount: 0 }), /weekCount/);
+  assert.throws(() => weld.buildWeldDashboard([], { topLimit: 0 }), /topLimit/);
+  const empty = weld.buildWeldDashboard([], period);
+  assert.equal(empty.overview.recordCount, 0);
+  assert.equal(empty.overview.recordsPerPiece, null);
+  assert.ok(empty.trend.every(item => item.recordCount === null));
+  const blank = weld.buildWeldDashboard([row({ '二维码': 'SYN-UNKNOWN', '缺陷内容': '' }), row()], {
+    ...period, line: '待识别线体', defects: ['']
+  });
+  assert.equal(blank.overview.recordCount, 1);
+  assert.deepEqual(blank.selected.defects, ['未填写']);
+});
+
+test('dashboard dynamic line OP Top5 plus other covers every filtered log with each line denominator', () => {
+  const rows = [100, 40, 20, 10, 60, 30].map(op => row({ productionLine: '21线', '缺陷位置': `示例-OP${op}` }));
+  rows.push(row({ productionLine: '21线', '缺陷位置': '' }),
+    row({ productionLine: '试制A线', '缺陷位置': '示例-OP40-60' }),
+    row({ '物料编码': 'SYN-OTHER', '缺陷位置': '无工位', '二维码': 'SYN-NO-LINE' }));
+  const result = weld.buildWeldDashboard(rows, period);
+  const line = result.lineOpSummary.find(item => item.line === '21线');
+  assert.equal(line.recordCount, 7);
+  assert.deepEqual(line.items.map(item => item.op), ['OP10', 'OP20', 'OP30', 'OP40', 'OP60', '其他']);
+  assert.equal(line.items.at(-1).count, 2);
+  assert.equal(line.items.at(-1).share, 2 / 7);
+  assert.deepEqual(result.lineOpSummary.find(item => item.line === '试制A线').items, [{ op: 'OP40-60', count: 1, share: 1 }]);
+  assert.deepEqual(result.lineOpSummary.find(item => item.line === '待识别线体').items, [{ op: '其他', count: 1, share: 1 }]);
+  for (const summary of result.lineOpSummary) {
+    assert.equal(summary.items.reduce((sum, item) => sum + item.count, 0), summary.recordCount);
+    assert.ok(Math.abs(summary.items.reduce((sum, item) => sum + item.share, 0) - 1) < 1e-12);
+  }
+});
+
+test('dashboard OP summaries share product, line, defect and keyword filters with detail', () => {
+  const rows = [row({ id: 'KEEP', productionLine: '21线', '缺陷内容': '气孔', '缺陷位置': 'OP40' }),
+    row({ id: 'DROP', productionLine: '21线', '缺陷内容': '气孔', '缺陷位置': 'OP60' }),
+    row({ id: 'KEEP-REAR', '物料编码': 'REAR_PRIMARY', productionLine: '21线', '缺陷内容': '气孔' }),
+    row({ id: 'KEEP-LINE', productionLine: '22线', '缺陷内容': '气孔' }),
+    row({ id: 'KEEP-DEFECT', productionLine: '21线', '缺陷内容': '咬边' })];
+  const result = weld.buildWeldDashboard(rows, { ...period, product: 'front', line: '21线', defects: ['气孔'], keyword: 'KEEP' });
+  assert.equal(result.overview.recordCount, 1);
+  assert.deepEqual(result.filteredRows.map(item => item.id), ['KEEP']);
+  assert.deepEqual(result.lineOpSummary, [{ line: '21线', recordCount: 1, items: [{ op: 'OP40', count: 1, share: 1 }] }]);
+});

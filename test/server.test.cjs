@@ -14,7 +14,13 @@ const QUERY = '?start=2026-10-01&end=2026-10-12&page=1&size=20';
 const CSV = '备件编号,备件名称,入库数量,库位,备注\nSYN-PIN,定位销,2,示例库位,仅预览';
 
 async function fixture(t, options = {}) {
-  const calls = { login: [], read: [] };
+  const calls = { login: [], read: [], save: [] };
+  let stored = options.credentials ? { ...options.credentials } : null;
+  const credentialStore = {
+    async load() { return stored ? { ...stored } : null; },
+    async save(value) { calls.save.push({ ...value }); stored = { ...value }; },
+    async remove() { stored = null; }
+  };
   let clock = Date.UTC(2026, 9, 12, 0, 0, 0);
   const source = {
     async login(username, password) {
@@ -28,7 +34,7 @@ async function fixture(t, options = {}) {
       return { columns: [{ key: 'id', label: '示例编号' }], rows: [{ id: 'SYNTHETIC-ROW' }], total: 1, module, complete: true, sourceTotal: 1, page: query.page, size: query.size };
     }
   };
-  const server = createPortal({ config: { admin: { ...ADMIN_CONFIG }, sourceBase: 'http://synthetic-source.invalid' }, source, now: () => clock });
+  const server = createPortal({ config: { admin: { ...ADMIN_CONFIG }, sourceBase: 'http://synthetic-source.invalid' }, source, credentialStore, now: () => clock });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const port = server.address().port;
@@ -57,7 +63,8 @@ test('anonymous status is readable but data, company connect and preview require
   const app = await fixture(t), response = await app.request('GET', '/local/status');
   assert.equal(response.status, 200);
   assert.equal(response.body.authenticated, false); assert.equal(response.body.connected, false);
-  assert.equal(response.body.account, null); assert.equal(response.body.sourceAccount, null); assert.equal(response.body.writeEnabled, false);
+  assert.equal(response.body.sourceStatus.state, 'unconfigured');
+  assert.equal(response.body.account, null); assert.equal(Object.hasOwn(response.body, 'sourceAccount'), false); assert.equal(response.body.writeEnabled, false);
   for (const module of ['weld', 'alarm', 'spares']) assert.equal((await app.request('GET', `/local/data/${module}${QUERY}`)).status, 401);
   assert.equal((await app.request('POST', '/local/connect', { username: SOURCE_USER, password: SOURCE_PASSWORD })).status, 401);
   assert.equal((await app.request('POST', '/local/import-preview', { filename: 'test.csv', content: CSV })).status, 401);
@@ -73,7 +80,8 @@ test('local admin login sets protected cookie without invoking company authentic
   assert.match(cookie, /^portal_session=[a-f0-9]{64};/); assert.match(cookie, /; HttpOnly(?:;|$)/);
   assert.match(cookie, /; SameSite=Strict(?:;|$)/); assert.match(cookie, /; Path=\/(?:;|$)/); assert.match(cookie, /; Max-Age=28800(?:;|$)/);
   const headers = { Cookie: response.cookie }, status = await app.request('GET', '/local/status', undefined, headers);
-  assert.equal(status.body.authenticated, true); assert.equal(status.body.connected, false); assert.equal(status.body.sourceAccount, null);
+  assert.equal(status.body.authenticated, true); assert.equal(status.body.connected, false); assert.equal(Object.hasOwn(status.body, 'sourceAccount'), false);
+  assert.equal(status.body.sourceStatus.state, 'unconfigured');
   assert.equal((await app.request('GET', `/local/data/weld${QUERY}`, undefined, headers)).status, 428);
   assert.equal(app.calls.read.length, 0);
 });
@@ -84,19 +92,20 @@ test('incorrect local admin password does not set cookie or call company source'
   assert.equal((await app.request('GET', '/local/status')).body.authenticated, false);
 });
 
-test('company connect passes only company credentials to mock and does not persist credentials', async t => {
+test('source settings validate and persist through the encrypted store abstraction without exposing account or secret', async t => {
   const writes = [];
   for (const method of ['writeFile', 'writeFileSync', 'appendFile', 'appendFileSync', 'createWriteStream']) t.mock.method(fs, method, () => { writes.push(method); throw new Error('Unexpected filesystem write'); });
   for (const method of ['writeFile', 'appendFile']) t.mock.method(fs.promises, method, async () => { writes.push(method); throw new Error('Unexpected filesystem write'); });
   const app = await fixture(t), auth = await app.login(); assert.equal(app.calls.login.length, 0);
   const enteredCompanyUser = `  ${SOURCE_USER}  `;
   const response = await app.connect(auth.cookie, enteredCompanyUser);
-  assert.equal(response.status, 200); assert.equal(response.body.connected, true); assert.equal(response.body.sourceAccount, enteredCompanyUser);
+  assert.equal(response.status, 200); assert.equal(response.body.connected, true); assert.equal(Object.hasOwn(response.body, 'sourceAccount'), false);
+  assert.deepEqual(app.calls.save, [{ username: enteredCompanyUser, password: SOURCE_PASSWORD }]);
   assert.deepEqual(app.calls.login, [{ username: enteredCompanyUser, password: SOURCE_PASSWORD }]); assert.deepEqual(writes, []);
   for (const secret of [ADMIN_PASSWORD, SOURCE_PASSWORD, 'synthetic-upstream-token']) assert.equal(response.text.includes(secret), false);
   const status = await app.request('GET', '/local/status', undefined, { Cookie: auth.cookie });
   assert.equal(status.body.authenticated, true); assert.equal(status.body.account, ADMIN_USER);
-  assert.equal(status.body.sourceAccount, enteredCompanyUser); assert.equal(status.body.connected, true);
+  assert.equal(Object.hasOwn(status.body, 'sourceAccount'), false); assert.equal(status.body.connected, true);
 });
 
 test('connected reads receive upstream session without password and cache exact successful query', async t => {
@@ -132,7 +141,7 @@ test('switching company connection isolates old read context and rejects stale r
   await oldReadStarted;
   const switched = await app.connect(auth.cookie, 'synthetic-second-company-user');
   assert.equal(switched.status, 200);
-  assert.equal(switched.body.sourceAccount, 'synthetic-second-company-user');
+  assert.equal(Object.hasOwn(switched.body, 'sourceAccount'), false);
   const fresh = await app.request('GET', `/local/data/weld${QUERY}`, undefined, headers);
   assert.equal(fresh.status, 200);
   assert.deepEqual(fresh.body.rows, [{ id: 'NEW-SOURCE-ROW' }]);
@@ -154,7 +163,7 @@ test('disconnect clears upstream token and cached data while preserving local ad
   assert.equal((await app.request('POST', '/local/disconnect', {}, headers)).body.connected, false);
   const status = await app.request('GET', '/local/status', undefined, headers);
   assert.equal(status.body.authenticated, true); assert.equal(status.body.connected, false);
-  assert.equal(status.body.account, ADMIN_USER); assert.equal(status.body.sourceAccount, null);
+  assert.equal(status.body.account, ADMIN_USER); assert.equal(Object.hasOwn(status.body, 'sourceAccount'), false);
   assert.equal((await app.request('GET', `/local/data/spares${QUERY}`, undefined, headers)).status, 428); assert.equal(app.calls.read.length, 1);
 });
 
@@ -163,19 +172,19 @@ test('logout expires portal cookie and rejects reuse regardless of company conne
   const response = await app.request('POST', '/local/logout', {}, headers);
   assert.equal(response.status, 200); assert.match(response.headers['set-cookie'][0], /^portal_session=;/); assert.match(response.headers['set-cookie'][0], /Max-Age=0/);
   const status = await app.request('GET', '/local/status', undefined, headers);
-  assert.equal(status.body.authenticated, false); assert.equal(status.body.connected, false);
+  assert.equal(status.body.authenticated, false); assert.equal(status.body.connected, true);
   assert.equal((await app.request('GET', `/local/data/alarm${QUERY}`, undefined, headers)).status, 401); assert.equal((await app.connect(auth.cookie)).status, 401);
 });
 
-test('upstream read 401 becomes 428 and clears company connection but retains admin session', async t => {
+test('upstream read 401 reauthenticates once, then stops retrying while retaining portal login', async t => {
   const app = await fixture(t, { read: async module => { if (module === 'alarm') throw new PortalError('Synthetic expired company session', 401); return { rows: [], columns: [], total: 0 }; } });
   const auth = await app.connected(), headers = { Cookie: auth.cookie };
   assert.equal((await app.request('GET', `/local/data/spares${QUERY}`, undefined, headers)).status, 200);
   assert.equal((await app.request('GET', `/local/data/alarm${QUERY}`, undefined, headers)).status, 428);
   const status = await app.request('GET', '/local/status', undefined, headers);
   assert.equal(status.body.authenticated, true); assert.equal(status.body.account, ADMIN_USER);
-  assert.equal(status.body.connected, false); assert.equal(status.body.sourceAccount, null);
-  assert.equal((await app.request('GET', `/local/data/spares${QUERY}`, undefined, headers)).status, 428); assert.equal(app.calls.read.length, 2);
+  assert.equal(status.body.connected, false); assert.equal(Object.hasOwn(status.body, 'sourceAccount'), false);
+  assert.equal((await app.request('GET', `/local/data/spares${QUERY}`, undefined, headers)).status, 428); assert.equal(app.calls.read.length, 3); assert.equal(app.calls.login.length, 2);
 });
 
 test('wrong company credentials return 400 and keep portal administrator signed in', async t => {
@@ -194,7 +203,7 @@ test('source 403 preserves sessions; local session expires after eight hours', a
   assert.equal((await app.request('GET', `/local/data/spares${QUERY}`, undefined, headers)).status, 200);
   app.advance(8 * 60 * 60 * 1000 + 1);
   const expired = await app.request('GET', '/local/status', undefined, headers);
-  assert.equal(expired.body.authenticated, false); assert.equal(expired.body.connected, false);
+  assert.equal(expired.body.authenticated, false); assert.equal(expired.body.connected, true);
   assert.equal((await app.request('GET', `/local/data/weld${QUERY}`, undefined, headers)).status, 401);
 });
 
@@ -212,7 +221,7 @@ test('Host, Origin and cross-site request defenses protect reads and company con
 
 test('static routing cannot expose private config, admin hashes or source code', async t => {
   const app = await fixture(t);
-  for (const route of ['/config.local.json', '/server.cjs', '/lib/admin.cjs', '/lib/source.cjs', '/%2e%2e%2fconfig.local.json', '/..%5cconfig.local.json']) {
+  for (const route of ['/config.local.json', '/server.cjs', '/lib/admin.cjs', '/lib/source.cjs', '/runtime/source-credentials.dpapi.json', '/%2e%2e%2fconfig.local.json', '/..%5cconfig.local.json']) {
     const response = await app.request('GET', route); assert.equal(response.status, 404, route); assert.equal(response.text.includes(ADMIN_CONFIG.passwordHash), false);
   }
   const response = await app.request('GET', '/local/status');
@@ -229,4 +238,25 @@ test('CSV preview requires local admin login but not company connectivity', asyn
   const formula = await app.request('POST', '/local/import-preview', { filename: 'synthetic.csv', content: CSV.replace('仅预览', '=1+1') }, headers);
   assert.equal(formula.body.valid, false); assert.ok(formula.body.errors.some(item => item.code === 'formula_cell'));
   assert.equal((await app.request('POST', '/local/import-preview', { filename: 'synthetic.csv', content: {} }, headers)).status, 400);
+});
+
+
+test('preconfigured source connects automatically and is shared by distinct portal sessions', async t => {
+  const app = await fixture(t, { credentials: { username: SOURCE_USER, password: SOURCE_PASSWORD } });
+  const first = await app.login(), second = await app.login();
+  const firstRead = await app.request('GET', `/local/data/weld${QUERY}`, undefined, { Cookie: first.cookie });
+  const secondRead = await app.request('GET', `/local/data/weld${QUERY}`, undefined, { Cookie: second.cookie });
+  assert.equal(firstRead.status, 200); assert.equal(secondRead.status, 200);
+  assert.equal(app.calls.login.length, 1); assert.equal(app.calls.read.length, 1); assert.equal(app.calls.save.length, 0);
+  const status = await app.request('GET', '/local/status', undefined, { Cookie: second.cookie });
+  assert.deepEqual(status.body.sourceStatus, { state: 'ready', configured: true, retryAt: null, error: null });
+  for (const secret of [SOURCE_USER, SOURCE_PASSWORD, 'synthetic-upstream-token']) assert.equal(status.text.includes(secret), false);
+});
+
+test('failed source settings are not saved and immediate repeated attempts are throttled', async t => {
+  const app = await fixture(t, { login: async () => { throw new PortalError('Synthetic refusal', 401); } });
+  const auth = await app.login();
+  assert.equal((await app.connect(auth.cookie)).status, 400);
+  assert.equal((await app.connect(auth.cookie)).status, 429);
+  assert.equal(app.calls.save.length, 0); assert.equal(app.calls.login.length, 1);
 });
