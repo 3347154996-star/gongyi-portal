@@ -159,7 +159,7 @@ test('dashboard defaults to all materials, lines and defects, including missing 
     row({ '物料编码': '', '二维码': 'unrecognized', '缺陷内容': '外观待判' })
   ];
   const result = weld.buildWeldDashboard(rows, period);
-  assert.deepEqual(result.selected, { product: 'all', line: 'all', defects: [] });
+  assert.deepEqual(result.selected, { product: 'all', line: 'all', defects: [], defectType: 'all', op: 'all', location: 'all' });
   assert.equal(result.overview.recordCount, 4);
   assert.equal(result.overview.pieceCount, 3);
   assert.equal(result.overview.materialCount, 3);
@@ -450,4 +450,185 @@ test('full explicit line names remain intact while reliable numeric fields use k
   assert.equal(result.overview.recordCount, 6);
   assert.equal(result.overview.unknownLineCount, 0);
   assert.equal(result.overview.lineCount, 6);
+});
+
+test('every defect exposes complete line/OP/location detail without Top5 truncation or duplicated joint labels', () => {
+  const rows = [1, 2, 3, 4, 5, 6, 7].map(index => row({ id: `SYN-P${index}`, '缺陷内容': '合成缺陷甲/合成缺陷乙',
+    '缺陷位置': `TSL-${index}-合成位置-OP040-BR01` }));
+  rows.push(row({ id: 'SYN-UNKNOWN', '缺陷内容': '合成缺陷甲/合成缺陷乙', '缺陷位置': '' }),
+    row({ id: 'SYN-SECOND-LINE', '缺陷内容': '合成缺陷甲/合成缺陷乙', '二维码': 'SYN12A001', '缺陷位置': 'TSL-1-合成位置-OP20' }),
+    row({ id: 'SYN-SECOND-DEFECT', '缺陷内容': '独立合成缺陷', '缺陷位置': 'TSL-1-合成位置-OP20' }));
+  const result = weld.buildWeldDashboard(rows, { ...period, page: 2, size: 2 });
+  assert.equal(result.defectSummary.length, 2);
+  const defect = result.defectSummary.find(item => item.defect === '合成缺陷甲/合成缺陷乙');
+  assert.equal(defect.recordCount, 9);
+  assert.equal(result.overview.recordCount, 10);
+  const line = defect.lines.find(item => item.line === '11线前副');
+  assert.equal(line.ops.find(item => item.op === 'OP40').locations.length, 7, 'all positions are present, including those outside dashboard Top5');
+  assert.equal(line.ops.find(item => item.op === '其他').label, '未识别工位');
+  assert.equal(line.ops.find(item => item.op === '其他').locations[0].location, '未填写位置');
+  for (const currentDefect of result.defectSummary) {
+    assert.equal(currentDefect.lines.reduce((sum, item) => sum + item.recordCount, 0), currentDefect.recordCount);
+    assert.ok(Math.abs(currentDefect.lines.reduce((sum, item) => sum + item.share, 0) - 1) < 1e-12);
+    for (const currentLine of currentDefect.lines) {
+      assert.equal(currentLine.ops.reduce((sum, item) => sum + item.recordCount, 0), currentLine.recordCount);
+      assert.ok(Math.abs(currentLine.ops.reduce((sum, item) => sum + item.share, 0) - 1) < 1e-12);
+      for (const op of currentLine.ops) {
+        assert.equal(op.locations.reduce((sum, item) => sum + item.recordCount, 0), op.recordCount);
+        assert.ok(Math.abs(op.locations.reduce((sum, item) => sum + item.share, 0) - 1) < 1e-12);
+      }
+    }
+  }
+});
+
+test('hierarchy piece counts dedupe per node but remain non-additive across locations', () => {
+  const rows = [row({ '缺陷位置': 'TSL-1-合成位置-OP40' }), row({ '缺陷位置': 'TSL-2-合成位置-OP40' }),
+    row({ '物料编码': 'FRONT_SECONDARY', '缺陷位置': 'TSL-2-合成位置-OP40' })];
+  const result = weld.buildWeldDashboard(rows, period);
+  const defect = result.defectSummary[0], op = defect.lines[0].ops[0];
+  assert.equal(defect.recordCount, 3);
+  assert.equal(defect.pieceCount, 2);
+  assert.equal(op.pieceCount, 2);
+  assert.equal(op.locations.reduce((sum, item) => sum + item.pieceCount, 0), 3);
+  assert.ok(result.notes.some(note => note.includes('各分支涉及件数不宜直接相加')));
+});
+
+test('hierarchy exact filters reproduce a selected branch across details, totals, OP, Top5 and trends', () => {
+  const rows = [row({ id: 'KEEP', '缺陷位置': 'TSL-1-合成位置-OP040-BR01' }),
+    row({ id: 'KEEP-DUPLICATE', '缺陷位置': 'TSL-1-合成位置-OP040-BR02' }),
+    row({ id: 'OTHER-POSITION', '缺陷位置': 'TSL-2-合成位置-OP40' }),
+    row({ id: 'OTHER-OP', '缺陷位置': 'TSL-1-合成位置-OP60' }),
+    row({ id: 'OTHER-LINE', '二维码': 'SYN12A001', '缺陷位置': 'TSL-1-合成位置-OP40' }),
+    row({ id: 'OTHER-DEFECT', '缺陷内容': '另一缺陷', '缺陷位置': 'TSL-1-合成位置-OP40' })];
+  const before = JSON.stringify(rows), all = weld.buildWeldDashboard(rows, period);
+  const defect = all.defectSummary.find(item => item.defect === '焊偏');
+  const line = defect.lines.find(item => item.line === '11线前副'), op = line.ops.find(item => item.op === 'OP40');
+  const location = op.locations.find(item => item.location === 'TSL-1-合成位置-OP40');
+  assert.deepEqual(location.filters, { defectType: 'all', defects: ['焊偏'], line: '11线前副', op: 'OP40', location: 'TSL-1-合成位置-OP40' });
+  const selected = weld.buildWeldDashboard(rows, { ...period, ...location.filters });
+  assert.deepEqual(selected.filteredRows.map(item => item.id), ['KEEP', 'KEEP-DUPLICATE']);
+  assert.equal(selected.overview.recordCount, location.recordCount);
+  assert.equal(selected.overview.pieceCount, location.pieceCount);
+  assert.equal(selected.selected.op, 'OP40');
+  assert.equal(selected.selected.location, 'TSL-1-合成位置-OP40');
+  assert.equal(selected.lineOpSummary[0].recordCount, 2);
+  assert.equal(selected.topLocations[0].recordCount, 2);
+  assert.equal(selected.trend.reduce((sum, item) => sum + (item.recordCount || 0), 0), 2);
+  assert.equal(selected.dailyTrend.reduce((sum, item) => sum + (item.recordCount || 0), 0), 2);
+  assert.equal(JSON.stringify(rows), before);
+});
+
+test('unknown OP and missing location are explicit exact filters rather than keyword guesses', () => {
+  const rows = [row({ id: 'MISSING', '缺陷内容': '', '缺陷位置': '' }),
+    row({ id: 'NO-OP', '缺陷位置': '合成位置但未给工位' }),
+    row({ id: 'REAL-OP', '缺陷位置': 'OP40', '备注': '包含未填写位置和其他等字样' })];
+  const all = weld.buildWeldDashboard(rows, { ...period, op: null, location: null });
+  assert.equal(all.overview.recordCount, 3);
+  assert.equal(all.selected.op, 'all');
+  assert.equal(all.selected.location, 'all');
+  const unknown = weld.buildWeldDashboard(rows, { ...period, op: '其他' });
+  assert.deepEqual(unknown.filteredRows.map(item => item.id), ['MISSING', 'NO-OP']);
+  const missing = weld.buildWeldDashboard(rows, { ...period, op: '其他', location: '未填写位置' });
+  assert.deepEqual(missing.filteredRows.map(item => item.id), ['MISSING']);
+  assert.deepEqual(missing.defectSummary[0].lines[0].ops[0].locations[0].filters,
+    { defectType: 'all', defects: ['未填写'], line: '11线前副', op: '其他', location: '未填写位置' });
+  assert.equal(weld.buildWeldDashboard(rows, { ...period, op: 'OP400' }).overview.recordCount, 0);
+});
+
+test('source parent types partition repeated content labels without relabeling missing parents', () => {
+  const rows = [row({ id: 'A-X', badness_type: '合成分类甲', '缺陷内容': '合成内容X' }),
+    row({ id: 'B-X', badness_type: '合成分类乙', '缺陷内容': '合成内容X' }),
+    row({ id: 'NO-X', badness_type: '', '缺陷内容': '合成内容X' }),
+    row({ id: 'A-Y', badness_type: '合成分类甲', '缺陷内容': '合成内容Y' })];
+  const snapshot = JSON.stringify(rows), report = weld.buildWeldDashboard(rows, period);
+  assert.equal(report.defectTypeSummary.reduce((sum, item) => sum + item.recordCount, 0), 4);
+  assert.equal(report.defectSummary.find(item => item.defect === '合成内容X').recordCount, 3);
+  assert.equal(report.defectTypeSummary.find(item => item.defectType === '合成分类甲').recordCount, 2);
+  assert.equal(report.defectTypeSummary.find(item => item.defectType === '未填写分类').recordCount, 1);
+  const classification = report.defectSummary.find(item => item.defect === '合成内容X').classification;
+  assert.equal(classification.parentTypes.length, 3);
+  assert.equal(classification.parentTypes.reduce((sum, item) => sum + item.recordCount, 0), 3);
+  assert.equal(classification.content, '合成内容X');
+  assert.equal(classification.furtherSubtypeStatus, 'not_provided');
+  assert.equal(report.catalogStatus.provided, false);
+  assert.equal(JSON.stringify(rows), snapshot);
+});
+
+test('typed defect hierarchy filters reproduce exact parent/content/line/OP/location branches', () => {
+  const rows = [row({ id: 'A', raw: { type: '合成分类甲' }, '缺陷内容': '合成联合内容甲/乙' }),
+    row({ id: 'B', raw: { type: '合成分类乙' }, '缺陷内容': '合成联合内容甲/乙' }),
+    row({ id: 'UNKNOWN', '缺陷内容': '合成联合内容甲/乙' })];
+  const settings = { ...period, fieldMap: { defectType: 'raw.type' } };
+  const report = weld.buildWeldDashboard(rows, settings);
+  const type = report.defectTypeSummary.find(item => item.defectType === '合成分类甲');
+  const content = type.defects[0], location = content.lines[0].ops[0].locations[0];
+  assert.equal(content.defect, '合成联合内容甲/乙');
+  assert.equal(content.share, 1);
+  assert.equal(type.share, 1 / 3);
+  assert.equal(location.filters.defectType, '合成分类甲');
+  const selected = weld.buildWeldDashboard(rows, { ...settings, ...location.filters });
+  assert.deepEqual(selected.filteredRows.map(item => item.id), ['A']);
+  assert.equal(selected.defectTypeSummary.length, 1);
+  assert.equal(selected.defectSummary[0].filters.defectType, '合成分类甲');
+  assert.equal(selected.selected.defectType, '合成分类甲');
+  assert.equal(selected.overview.recordCount, 1);
+  assert.deepEqual(weld.buildWeldDashboard(rows, { ...settings, defectType: '未填写分类' }).filteredRows.map(item => item.id), ['UNKNOWN']);
+});
+
+test('complete source coverage permits zero-only dictionary contents without creating source records', () => {
+  const rows = [row({ badness_type: '合成分类甲', '缺陷内容': '合成内容一' }),
+    row({ badness_type: '合成分类甲', '缺陷内容': '合成联合内容甲/乙' }),
+    row({ badness_type: '', '缺陷内容': '合成内容一' })];
+  const defectCatalog = [{ defectType: '合成分类甲', defects: ['合成内容一', '合成联合内容甲/乙', '合成未观测内容'] },
+    { defectType: '合成分类乙', defects: ['合成另一未观测内容'] }];
+  const report = weld.buildWeldDashboard(rows, { ...period, defectCatalog, sourceComplete: true });
+  const typeA = report.defectTypeSummary.find(item => item.defectType === '合成分类甲');
+  assert.equal(typeA.defects.length, 3);
+  const missing = typeA.defects.find(item => item.defect === '合成未观测内容');
+  assert.equal(missing.recordCount, 0); assert.equal(missing.pieceCount, 0); assert.equal(missing.share, 0);
+  assert.equal(missing.observedRows, 0); assert.equal(missing.catalogOnly, true); assert.deepEqual(missing.lines, []);
+  assert.deepEqual(missing.filters, { defectType: '合成分类甲', defects: ['合成未观测内容'] });
+  assert.equal(missing.classification.parentTypes[0].value, '合成分类甲');
+  assert.equal(typeA.defects.find(item => item.defect === '合成联合内容甲/乙').recordCount, 1);
+  const typeB = report.defectTypeSummary.find(item => item.defectType === '合成分类乙');
+  assert.equal(typeB.recordCount, 0); assert.equal(typeB.defects[0].recordCount, 0); assert.equal(typeB.share, 0);
+  assert.equal(report.defectTypeSummary.find(item => item.defectType === '未填写分类').recordCount, 1);
+  assert.equal(report.overview.recordCount, 3);
+  assert.equal(report.filteredRows.length, 3);
+  assert.equal(report.defectSummary.length, 2, 'legacy overall summary remains observed contents only');
+  assert.equal(report.defectTypeSummary.reduce((sum, item) => sum + item.recordCount, 0), 3);
+  assert.deepEqual(report.catalogStatus, { provided: true, typeCount: 2, contentCount: 4, sourceComplete: true });
+});
+
+test('partial or unproven source coverage keeps unobserved dictionary contents null', () => {
+  const rows = [row({ badness_type: '合成分类甲', '缺陷内容': '合成已观测内容' })];
+  const defectCatalog = [{ defectType: '合成分类甲', defects: ['合成已观测内容', '合成未观测内容'] },
+    { defectType: '合成分类乙', defects: ['合成另一未观测内容'] }];
+  for (const sourceComplete of [false, undefined]) {
+    const report = weld.buildWeldDashboard(rows, { ...period, defectCatalog, sourceComplete });
+    const typeA = report.defectTypeSummary.find(item => item.defectType === '合成分类甲');
+    assert.equal(typeA.defects.find(item => item.defect === '合成已观测内容').recordCount, 1);
+    const missing = typeA.defects.find(item => item.defect === '合成未观测内容');
+    assert.equal(missing.recordCount, null); assert.equal(missing.pieceCount, null); assert.equal(missing.share, null);
+    assert.equal(missing.classification.parentTypes[0].recordCount, null);
+    const typeB = report.defectTypeSummary.find(item => item.defectType === '合成分类乙');
+    assert.equal(typeB.recordCount, null); assert.equal(typeB.defects[0].recordCount, null);
+    assert.equal(report.options.defectTypes.find(item => item.value === '合成分类乙').count, null);
+    assert.equal(report.overview.recordCount, 1);
+  }
+});
+
+test('catalog de-duplicates labels, retains observed contents absent from dictionary, and obeys parent filter', () => {
+  const rows = [row({ badness_type: '合成分类甲', '缺陷内容': '合成历史内容' }),
+    row({ badness_type: '合成分类乙', '缺陷内容': '合成内容乙' })];
+  const defectCatalog = [{ defectType: '合成分类甲', defects: ['合成内容甲', '合成内容甲'] },
+    { defectType: '合成分类甲', defects: ['合成内容甲', '合成内容丙'] },
+    { defectType: '合成分类乙', defects: ['合成内容乙'] }];
+  const report = weld.buildWeldDashboard(rows, { ...period, defectCatalog, defectType: '合成分类甲', sourceComplete: true });
+  assert.equal(report.defectTypeSummary.length, 1);
+  assert.equal(report.defectTypeSummary[0].defects.length, 3);
+  assert.equal(report.defectTypeSummary[0].defects.find(item => item.defect === '合成历史内容').recordCount, 1);
+  assert.equal(report.overview.recordCount, 1);
+  assert.equal(report.catalogStatus.contentCount, 3);
+  assert.throws(() => weld.buildWeldDashboard([], { defectCatalog: {} }), /array/);
 });

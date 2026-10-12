@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#20478f">
   <title>工艺部业务门户</title>
-  <link rel="stylesheet" href="styles.css?v=20261012-11">
-  <script src="app.js?v=20261012-11" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20261012-12">
+  <script src="app.js?v=20261012-12" defer></script>
 </head>
 <body class="logged-out">
   <section id="loginScreen" class="login-screen" aria-labelledby="loginTitle">
@@ -49,6 +49,7 @@
           <label class="field keyword-field"><span>关键词</span><input id="keywordInput" type="search" autocomplete="off" placeholder="搜索当前模块记录"></label>
           <button id="queryButton" class="button primary" type="submit">查询数据</button>
         </form>
+        <div id="weldDrillFilters" class="weld-drill-filters" aria-label="缺陷明细定位条件" hidden></div>
         <div id="alarmFilterActions" class="alarm-filter-actions" hidden><details id="alarmMoreFilters" class="alarm-more-filters"><summary id="alarmMoreLabel">更多筛选</summary><div id="alarmMoreFields" class="alarm-more-fields"></div></details></div>
         <div id="quickRanges" class="quick-ranges" role="group" aria-label="报警快捷日期" hidden><span>快捷日期</span><button type="button" data-days="1">今日</button><button type="button" data-days="7">近 7 天</button><button type="button" data-days="30">近 30 天</button></div>
         <div id="refreshRow" class="refresh-row"><div class="refresh-controls"><button id="refreshButton" class="button" type="button">立即刷新</button><label id="intervalField" class="inline-field"><span>轮询间隔</span><select id="pollInterval" aria-label="自动刷新间隔"><option value="15">15 秒</option><option value="30" selected>30 秒</option><option value="60">60 秒</option></select></label><button id="pollButton" class="button" type="button" aria-pressed="false">启动自动刷新</button></div><span id="pollStatus" class="muted" role="status">默认每 30 秒自动更新，可随时暂停</span></div>
@@ -67,6 +68,7 @@
   </div>
   <dialog id="connectionDialog" aria-labelledby="connectionTitle"><form id="connectionForm"><div class="dialog-heading"><div><p class="eyebrow">管理员设置</p><h2 id="connectionTitle">数据源设置</h2></div><button id="closeConnectionDialog" class="icon-button" type="button" aria-label="关闭数据源设置">×</button></div><p class="dialog-note">首次配置时填写公司系统账号。验证通过后在本机保存，日常登录门户即可自动读取数据。</p><label class="field"><span>公司系统账号</span><input id="sourceUsernameInput" name="sourceUsername" type="text" autocomplete="username" placeholder="请输入公司系统账号" required></label><label class="field"><span>公司系统密码</span><input id="sourcePasswordInput" name="sourcePassword" type="password" autocomplete="current-password" placeholder="请输入公司系统密码" required></label><p id="sourceConnectError" class="form-error" role="alert" hidden></p><button id="sourceConnectSubmit" class="button primary" type="submit">验证并保存设置</button><p class="dialog-note">密码提交后即清空。读取失败时系统会自动重试；仅配置失效时需要管理员更新。</p></form></dialog>
   <dialog id="alarmDetailDialog" aria-labelledby="alarmDetailTitle"><div class="dialog-heading"><div><p class="eyebrow">报警记录 · 只读详情</p><h2 id="alarmDetailTitle">报警详情</h2></div><button id="closeAlarmDetail" class="icon-button" type="button" aria-label="关闭报警详情">×</button></div><div id="alarmDetailBody"></div></dialog>
+  <dialog id="weldDefectDialog" aria-labelledby="weldDefectTitle"><div class="weld-detail-heading"><div><p class="eyebrow">缺陷明细 · 线体与工位</p><h2 id="weldDefectTitle">缺陷明细</h2></div><button id="closeWeldDefectDetail" class="icon-button" type="button" aria-label="关闭缺陷明细">×</button></div><div id="weldDefectBody" class="weld-detail-body"></div></dialog>
   <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

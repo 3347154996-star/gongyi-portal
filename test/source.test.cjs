@@ -62,6 +62,57 @@ test('repeated defect selections and alarm filters parse predictably',()=>{
   const p=new URLSearchParams('defect=焊偏&defect=气孔&defect=气孔&product=other&line=示例线&status=processing&group=示例小组');const parsed=parseQuery(p,'weld');
   assert.deepEqual(parsed.defects,['焊偏','气孔']);assert.equal(parsed.product,'other');assert.equal(parsed.status,'processing');assert.equal(parsed.line,'示例线');
 });
+
+test('weld drill-down applies exact normalized OP and location before page slicing',async()=>{
+  const data=[row(1),{...row(2),badness_location_name:'TSL-02-OP020-A'}, {...row(3),badness_location_name:'TSL-02-OP020-B'}, {...row(4),badness_location_name:'TSL-03-OP020-A'}];
+  const source=createSource(config,async()=>response({code:0,total:data.length,data}));
+  const parsed=parseQuery(new URLSearchParams({start:'2026-09-21',end:'2026-09-27',defect:'焊偏',line:'11线前副',op:'OP20',location:'TSL-02-OP20',size:'1'}),'weld');
+  const result=await source.read('weld',parsed,{token:'mock'});
+  assert.equal(result.total,2);assert.equal(result.rows.length,1);assert.equal(result.report.overview.recordCount,2);
+  assert.equal(result.report.selected.op,'OP20');assert.equal(result.report.selected.location,'TSL-02-OP20');
+  assert.equal(result.report.defectSummary[0].lines[0].ops[0].locations[0].recordCount,2);
+  assert.equal(parseQuery(new URLSearchParams(),'weld').op,'all');
+  assert.throws(()=>parseQuery(new URLSearchParams({location:'X'.repeat(501)}),'weld'),/筛选内容过长/);
+});
+
+test('verified classification dictionary augments observed details and is cached within the source session',async()=>{
+  let dictionaryReads=0;
+  const data=[{...row(1),badness_type:'示例焊接类',badness_type_id:'synthetic-type',badness_content_id:'synthetic-offset'}];
+  const source=createSource(config,async url=>{
+    if(url.pathname==='/api/unqualified/getall/badness_content'){
+      dictionaryReads++;assert.equal(url.searchParams.get('id'),'synthetic-type');
+      return response({code:0,data:[{label:'焊偏',value:'synthetic-offset'},{label:'断焊/未满焊',value:'synthetic-combined'}]});
+    }
+    return response({code:0,total:1,data});
+  });
+  const session={token:'mock'},result=await source.read('weld',q(),session);
+  assert.equal(result.report.catalogStatus.complete,true);assert.equal(result.report.defectTypeSummary[0].defectType,'示例焊接类');
+  const combined=result.report.defectTypeSummary[0].defects.find(item=>item.defect==='断焊/未满焊');
+  assert.equal(combined.recordCount,0);assert.equal(result.total,1);
+  const filtered=await source.read('weld',q({defectType:'其他示例类'}),session);assert.equal(filtered.total,0);assert.equal(dictionaryReads,1);
+});
+
+test('dictionary denial keeps authorized business records and does not force new source login',async()=>{
+  let dictionaryReads=0;
+  const source=createSource(config,async url=>{
+    if(url.pathname==='/api/unqualified/getall/badness_content'){dictionaryReads++;return {ok:false,status:403};}
+    return response({code:0,total:1,data:[{...row(1),badness_type:'示例焊接类',badness_type_id:'synthetic-type'}]});
+  });
+  const session={token:'mock'},result=await source.read('weld',q(),session);
+  assert.equal(result.total,1);assert.equal(result.complete,true);assert.equal(result.report.catalogStatus.available,false);
+  assert.equal(result.report.defectTypeSummary[0].defects[0].defect,'焊偏');
+  await source.read('weld',q(),session);assert.equal(dictionaryReads,1);
+});
+
+test('known catalog cannot certify classifications with missing source parent IDs',async()=>{
+  const source=createSource(config,async url=>url.pathname==='/api/unqualified/getall/badness_content'
+    ?response({code:0,data:[{value:'synthetic-offset',label:'焊偏'}]})
+    :response({code:0,total:2,data:[{...row(1),badness_type:'示例类',badness_type_id:'synthetic-type'},{...row(2),badness_type:'未映射示例类'}]}));
+  const result=await source.read('weld',q(),{token:'mock'});
+  assert.equal(result.total,2);assert.equal(result.complete,true);assert.equal(result.report.catalogStatus.available,true);
+  assert.equal(result.report.catalogStatus.complete,false);assert.equal(result.report.catalogStatus.unresolvedRows,1);
+  assert.equal(result.report.defectTypeSummary.length,2);
+});
 test('duplicate IDs within one source page remain records but invalidate completeness',async()=>{
   const source=createSource(config,async()=>response({code:0,total:2,data:[row(1),row(1)]}));const r=await source.read('weld',q(),{token:'mock'});assert.equal(r.total,2);assert.equal(r.complete,false);assert.match(r.note,/重复记录ID/);
 });
