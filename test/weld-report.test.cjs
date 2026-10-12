@@ -195,7 +195,7 @@ test('dashboard explicit production line fields take priority and retain conflic
     row({ productionLine: ' ', lineName: '装配A线', line: '装配A线' }),
     row({ '二维码': 'unsupported-qr', line: '研制B线' })
   ], period);
-  assert.deepEqual(new Set(result.lineSummary.map(item => item.line)), new Set(['21线', '装配A线', '研制B线']));
+  assert.deepEqual(new Set(result.lineSummary.map(item => item.line)), new Set(['21线前副', '装配A线', '研制B线']));
   assert.equal(result.diagnostics.explicitLineConflicts, 1);
   assert.equal(result.diagnostics.qrFieldConflicts, 2);
   assert.deepEqual(result.diagnostics.lineSources, { explicit: 3, rule: 0, legacyQr: 0, unknown: 0 });
@@ -205,8 +205,8 @@ test('dashboard QR fallback never generalizes the verified suffix to arbitrary l
   const rows = [row({ '二维码': 'DEMO21A001' }), row({ '二维码': 'DEMO11A001' }),
     row({ '二维码': 'DEMO999A001', '备注': '21线' }), row({ '二维码': 'DEMO12A001suffix' })];
   const result = weld.buildWeldDashboard(rows, period);
-  assert.equal(result.lineSummary.find(item => item.line === '待识别线体').recordCount, 3);
-  assert.equal(result.lineSummary.find(item => item.line === '11线').recordCount, 1);
+  assert.equal(result.lineSummary.find(item => item.line === '前副（线体待确认）').recordCount, 3);
+  assert.equal(result.lineSummary.find(item => item.line === '11线前副').recordCount, 1);
   assert.equal(result.diagnostics.lineSources.legacyQr, 1);
   assert.equal(weld.buildWeldDashboard(rows, { ...period, allowLegacyQr: false }).overview.unknownLineCount, 4);
   const other = weld.buildWeldDashboard([row({ '物料编码': 'SYN-OTHER' }), row()], {
@@ -216,7 +216,7 @@ test('dashboard QR fallback never generalizes the verified suffix to arbitrary l
   const configured = weld.buildWeldDashboard([row({ '物料编码': 'SYN-F1' })], {
     ...period, materialGroups: { front: ['SYN-F1'], rear: ['SYN-R1'] }
   });
-  assert.equal(configured.lineSummary[0].line, '11线');
+  assert.equal(configured.lineSummary[0].line, '11线前副');
 });
 
 test('dashboard configured line rules handle verified new formats and conflicting rules stay unknown', () => {
@@ -224,7 +224,7 @@ test('dashboard configured line rules handle verified new formats and conflictin
     row({ '二维码': 'SYN-L21-A003', productionLine: '明确线体' }), row({ '二维码': 'OTHER-L21-A001' })];
   const rule = { id: 'synthetic-line-format', field: 'qr', pattern: '^SYN-L(21|22)-[A-Z][0-9]{3}$', group: 1, suffix: '线' };
   const result = weld.buildWeldDashboard(rows, { ...period, lineRules: [rule] });
-  assert.deepEqual(new Set(result.lineSummary.map(item => item.line)), new Set(['21线', '22线', '明确线体', '待识别线体']));
+  assert.deepEqual(new Set(result.lineSummary.map(item => item.line)), new Set(['21线前副', '22线前副', '明确线体', '前副（线体待确认）']));
   assert.equal(result.diagnostics.lineSources.rule, 2);
   const conflict = weld.buildWeldDashboard([rows[0]], { ...period, lineRules: [rule, { field: 'qr', pattern: '^SYN-', line: '另一线' }] });
   assert.equal(conflict.overview.unknownLineCount, 1);
@@ -240,7 +240,7 @@ test('dashboard filters reconcile list, totals, charts, Top5 and date buckets un
     row({ id: 'e', productionLine: '21线', '缺陷内容': '咬边', '物料编码': 'REAR_PRIMARY' }),
     row({ id: 'f', productionLine: '21线', '缺陷内容': '咬边', '录入时间': '2026-10-19 09:00:00' })
   ];
-  const result = weld.buildWeldDashboard(rows, { ...period, product: 'front', line: '21线', defects: ['咬边', '未填写'] });
+  const result = weld.buildWeldDashboard(rows, { ...period, product: 'front', line: '21线前副', defects: ['咬边', '未填写'] });
   assert.deepEqual(result.filteredRows.map(item => item.id), ['a', 'b']);
   assert.equal(result.overview.recordCount, 2);
   for (const series of [result.lineSummary, result.defectSummary, result.topLocations, result.dailyTrend, result.trend]) {
@@ -250,7 +250,7 @@ test('dashboard filters reconcile list, totals, charts, Top5 and date buckets un
     assert.equal(top.byLine.reduce((sum, item) => sum + item.count, 0), top.recordCount);
     assert.equal(top.byDefect.reduce((sum, item) => sum + item.count, 0), top.recordCount);
   }
-  assert.equal(result.options.lines.find(item => item.value === '22线').count, 1, 'filter menus retain alternatives within the period');
+  assert.equal(result.options.lines.find(item => item.value === '22线前副').count, 1, 'filter menus retain alternatives within the period');
   assert.equal(result.options.products.find(item => item.value === 'all').count, 5);
   assert.equal(result.options.products.find(item => item.value === 'rear').count, 1);
   assert.equal(result.diagnostics.outsidePeriodRows, 1);
@@ -334,7 +334,7 @@ test('dashboard validates filters, preserves empty output, and supports unknown/
   assert.equal(empty.overview.recordsPerPiece, null);
   assert.ok(empty.trend.every(item => item.recordCount === null));
   const blank = weld.buildWeldDashboard([row({ '二维码': 'SYN-UNKNOWN', '缺陷内容': '' }), row()], {
-    ...period, line: '待识别线体', defects: ['']
+    ...period, line: '前副（线体待确认）', defects: ['']
   });
   assert.equal(blank.overview.recordCount, 1);
   assert.deepEqual(blank.selected.defects, ['未填写']);
@@ -346,13 +346,13 @@ test('dashboard dynamic line OP Top5 plus other covers every filtered log with e
     row({ productionLine: '试制A线', '缺陷位置': '示例-OP40-60' }),
     row({ '物料编码': 'SYN-OTHER', '缺陷位置': '无工位', '二维码': 'SYN-NO-LINE' }));
   const result = weld.buildWeldDashboard(rows, period);
-  const line = result.lineOpSummary.find(item => item.line === '21线');
+  const line = result.lineOpSummary.find(item => item.line === '21线前副');
   assert.equal(line.recordCount, 7);
   assert.deepEqual(line.items.map(item => item.op), ['OP10', 'OP20', 'OP30', 'OP40', 'OP60', '其他']);
   assert.equal(line.items.at(-1).count, 2);
   assert.equal(line.items.at(-1).share, 2 / 7);
   assert.deepEqual(result.lineOpSummary.find(item => item.line === '试制A线').items, [{ op: 'OP40-60', count: 1, share: 1 }]);
-  assert.deepEqual(result.lineOpSummary.find(item => item.line === '待识别线体').items, [{ op: '其他', count: 1, share: 1 }]);
+  assert.deepEqual(result.lineOpSummary.find(item => item.line === '物料 SYN-OTHER（线体待确认）').items, [{ op: '其他', count: 1, share: 1 }]);
   for (const summary of result.lineOpSummary) {
     assert.equal(summary.items.reduce((sum, item) => sum + item.count, 0), summary.recordCount);
     assert.ok(Math.abs(summary.items.reduce((sum, item) => sum + item.share, 0) - 1) < 1e-12);
@@ -365,8 +365,89 @@ test('dashboard OP summaries share product, line, defect and keyword filters wit
     row({ id: 'KEEP-REAR', '物料编码': 'REAR_PRIMARY', productionLine: '21线', '缺陷内容': '气孔' }),
     row({ id: 'KEEP-LINE', productionLine: '22线', '缺陷内容': '气孔' }),
     row({ id: 'KEEP-DEFECT', productionLine: '21线', '缺陷内容': '咬边' })];
-  const result = weld.buildWeldDashboard(rows, { ...period, product: 'front', line: '21线', defects: ['气孔'], keyword: 'KEEP' });
+  const result = weld.buildWeldDashboard(rows, { ...period, product: 'front', line: '21线前副', defects: ['气孔'], keyword: 'KEEP' });
   assert.equal(result.overview.recordCount, 1);
   assert.deepEqual(result.filteredRows.map(item => item.id), ['KEEP']);
-  assert.deepEqual(result.lineOpSummary, [{ line: '21线', recordCount: 1, items: [{ op: 'OP40', count: 1, share: 1 }] }]);
+  assert.deepEqual(result.lineOpSummary, [{ line: '21线前副', recordCount: 1, items: [{ op: 'OP40', count: 1, share: 1 }] }]);
+});
+
+test('product-qualified 11..14 lines separate front and rear without changing totals or deduplication', () => {
+  const materialGroups = { front: ['SYN-F1', 'SYN-F2'], rear: ['SYN-R1', 'SYN-R2'] };
+  const rows = [];
+  for (const line of ['11', '12', '13', '14']) for (const material of [...materialGroups.front, ...materialGroups.rear]) {
+    rows.push(row({ '物料编码': material, '二维码': `SYN-${line}A001`, '物料名称': '名称不替代已配置物料组' }));
+  }
+  rows.push({ ...rows[0] });
+  const snapshot = JSON.stringify(rows), result = weld.buildWeldDashboard(rows, { ...period, materialGroups });
+  const expected = ['11线前副', '11线后副', '12线前副', '12线后副', '13线前副', '13线后副', '14线前副', '14线后副'];
+  assert.deepEqual(new Set(result.lineSummary.map(item => item.line)), new Set(expected));
+  assert.deepEqual(new Set(result.lineOpSummary.map(item => item.line)), new Set(expected));
+  assert.deepEqual(new Set(result.options.lines.filter(item => item.value !== 'all').map(item => item.value)), new Set(expected));
+  assert.equal(result.overview.recordCount, 17);
+  assert.equal(result.overview.pieceCount, 16);
+  assert.equal(result.overview.duplicateRowsRetained, 1);
+  assert.equal(result.overview.lineCount, 8);
+  assert.equal(result.overview.unknownLineCount, 0);
+  assert.equal(result.diagnostics.productQualifiedLineRows, 17);
+  assert.equal(result.lineSummary.reduce((sum, item) => sum + item.recordCount, 0), 17);
+  assert.equal(result.lineOpSummary.reduce((sum, item) => sum + item.recordCount, 0), 17);
+  assert.equal(result.topLocations[0].byLine.reduce((sum, item) => sum + item.count, 0), 17);
+  assert.equal(result.defectSummary[0].byLine.reduce((sum, item) => sum + item.count, 0), 17);
+  assert.equal(JSON.stringify(rows), snapshot);
+});
+
+test('qualified line filters keep every aggregate and detail on one product-specific line', () => {
+  const rows = [row({ id: 'F1', '物料编码': 'FRONT_PRIMARY' }), row({ id: 'F2', '物料编码': 'FRONT_SECONDARY' }),
+    row({ id: 'R1', '物料编码': 'REAR_PRIMARY' }), row({ id: 'F12', '二维码': 'SYN12A001' })];
+  const result = weld.buildWeldDashboard(rows, { ...period, line: '11线前副' });
+  assert.deepEqual(result.filteredRows.map(item => item.id), ['F1', 'F2']);
+  assert.equal(result.overview.recordCount, 2);
+  assert.equal(result.overview.pieceCount, 2);
+  assert.deepEqual(result.lineSummary.map(item => item.line), ['11线前副']);
+  assert.deepEqual(result.lineOpSummary.map(item => item.line), ['11线前副']);
+  assert.deepEqual(result.topLocations[0].byLine, [{ line: '11线前副', count: 2 }]);
+  assert.equal(result.dailyTrend.reduce((sum, item) => sum + (item.recordCount || 0), 0), 2);
+  assert.equal(result.trend.reduce((sum, item) => sum + (item.recordCount || 0), 0), 2);
+  assert.ok(result.options.lines.some(item => item.value === '11线后副'), 'the other product stays available as a distinct option');
+});
+
+test('unrecognized physical lines stay separate by source product name without inventing QR mappings', () => {
+  const rows = [row({ '物料编码': 'SYN-A1', item_name: '合成车型甲后副', '二维码': 'SYN11A001' }),
+    row({ '物料编码': 'SYN-B1', item_name: '合成车型乙后副', '二维码': 'SYN12A001' }),
+    row({ '物料编码': 'SYN-A2', item_name: '合成车型甲后副', '二维码': 'UNVERIFIED' }),
+    row({ '物料编码': 'SYN-NO-NAME-1', '二维码': 'UNVERIFIED' }),
+    row({ '物料编码': 'SYN-NO-NAME-2', '二维码': 'UNVERIFIED' }),
+    row({ '物料编码': '', '二维码': 'UNVERIFIED' })];
+  const result = weld.buildWeldDashboard(rows, { ...period, fieldMap: { materialName: 'item_name' } });
+  const names = result.lineSummary.map(item => item.line);
+  assert.ok(names.includes('合成车型甲后副（线体待确认）'));
+  assert.ok(names.includes('合成车型乙后副（线体待确认）'));
+  assert.ok(names.includes('物料 SYN-NO-NAME-1（线体待确认）'));
+  assert.ok(names.includes('物料 SYN-NO-NAME-2（线体待确认）'));
+  assert.ok(names.includes('待识别线体'));
+  assert.equal(result.lineSummary.find(item => item.line === '合成车型甲后副（线体待确认）').recordCount, 2);
+  assert.equal(result.overview.recordCount, 6);
+  assert.equal(result.overview.unknownLineCount, 6);
+  assert.equal(result.overview.lineCount, 0);
+  assert.equal(result.diagnostics.pendingProductLineGroups, 5);
+  assert.ok(result.lineOpSummary.every(item => names.includes(item.line)));
+  const filtered = weld.buildWeldDashboard(rows, { ...period, fieldMap: { materialName: 'item_name' }, line: '合成车型甲后副（线体待确认）' });
+  assert.equal(filtered.overview.recordCount, 2);
+  assert.equal(filtered.overview.lineCount, 0);
+});
+
+test('full explicit line names remain intact while reliable numeric fields use known product identities', () => {
+  const rows = [row({ '物料编码': 'FRONT_PRIMARY', productionLine: '11线前副' }),
+    row({ '物料编码': 'REAR_PRIMARY', productionLine: '11线后副' }),
+    row({ '物料编码': 'FRONT_PRIMARY', productionLine: '21' }),
+    row({ '物料编码': 'REAR_PRIMARY', productionLine: '21号线' }),
+    row({ '物料编码': 'SYN-OTHER', '物料名称': '合成车型丙后副', productionLine: '22线' }),
+    row({ '物料编码': 'SYN-OTHER', '物料名称': '合成车型丙后副', productionLine: '来源明确完整线体名称' })];
+  const result = weld.buildWeldDashboard(rows, period);
+  assert.deepEqual(new Set(result.lineSummary.map(item => item.line)), new Set([
+    '11线前副', '11线后副', '21线前副', '21线后副', '22线 · 合成车型丙后副', '来源明确完整线体名称'
+  ]));
+  assert.equal(result.overview.recordCount, 6);
+  assert.equal(result.overview.unknownLineCount, 0);
+  assert.equal(result.overview.lineCount, 6);
 });

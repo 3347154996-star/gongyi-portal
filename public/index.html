@@ -5,30 +5,32 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#20478f">
   <title>工艺部业务门户</title>
-  <link rel="stylesheet" href="styles.css?v=20261012-10">
-  <script src="app.js?v=20261012-10" defer></script>
+  <link rel="stylesheet" href="styles.css?v=20261012-11">
+  <script src="app.js?v=20261012-11" defer></script>
 </head>
 <body class="logged-out">
   <section id="loginScreen" class="login-screen" aria-labelledby="loginTitle">
-    <div class="login-brand-panel"><a class="login-logo" href="#weld-weekly" aria-label="拓普工艺部业务门户"><img src="assets/tuopu-logo.png" alt="TUOPU 拓普" width="170" height="57"></a><div class="login-intro"><p class="login-kicker">TUOPU · PROCESS ENGINEERING</p><h1>让工艺数据，<br>回到同一个工作台。</h1><p>从补焊周报到实时记录，从安灯报警到重点备件，<br class="desktop-only">连接原系统，查看有依据的业务数据。</p><div class="login-module-list"><span>补焊周报</span><span>补焊实时监控</span><span>安灯报警</span><span>定位销与伸缩气缸</span></div></div><p class="login-brand-footer">工艺部业务门户 <span>PROCESS OPERATIONS PORTAL</span></p></div>
-    <div class="login-form-panel"><form id="loginForm"><div class="dialog-heading"><div><p class="eyebrow">欢迎使用</p><h2 id="loginTitle">管理员登录</h2></div></div><p class="dialog-note">使用门户管理员账号登录，进入工艺业务工作台。</p><label class="field"><span>管理员账号</span><input id="usernameInput" name="username" type="text" autocomplete="username" placeholder="请输入管理员账号" required></label><label class="field"><span>密码</span><input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required></label><p id="loginError" class="form-error" role="alert" hidden></p><button id="loginSubmit" class="button primary" type="submit">登录并进入工作台 <span aria-hidden="true">→</span></button><p class="login-security">使用门户账号登录。已配置的数据源会自动读取，无需重复连接。</p><div class="login-bottom-note"><span class="read-only-dot" aria-hidden="true"></span>管理员可访问全部四个功能，真实入库提交未开放</div></form></div>
+    <div class="login-composition">
+      <div class="login-brand-panel"><a class="login-logo" href="#weld-live" aria-label="拓普工艺部业务门户"><img src="assets/tuopu-logo.png" alt="TUOPU 拓普" width="170" height="57"></a><div class="login-intro"><p class="login-kicker">PROCESS ENGINEERING</p><h1>工艺部业务门户</h1><p>补焊记录、报警进度与重点备件，<br>集中查看，及时跟进。</p><div class="login-module-list"><div><span class="login-feature-icon weld-feature" aria-hidden="true">焊</span><span><strong>补焊点</strong><small>实时记录 · 日期查询 · 趋势</small></span></div><div><span class="login-feature-icon alarm-feature" aria-hidden="true">灯</span><span><strong>安灯报警</strong><small>线体与部门 · 处理进度</small></span></div><div><span class="login-feature-icon spare-feature" aria-hidden="true">件</span><span><strong>重点备件</strong><small>定位销 · 伸缩气缸</small></span></div></div></div><p class="login-brand-footer">TUOPU <span>工艺管理 · 业务协同</span></p></div>
+      <div class="login-form-panel"><form id="loginForm"><div class="dialog-heading"><div><p class="eyebrow">欢迎使用</p><h2 id="loginTitle">管理员登录</h2></div></div><p class="dialog-note">登录门户，进入业务工作台。</p><label class="field"><span>管理员账号</span><input id="usernameInput" name="username" type="text" autocomplete="username" placeholder="请输入管理员账号" required></label><label class="field"><span>密码</span><input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required></label><p id="loginError" class="form-error" role="alert" hidden></p><button id="loginSubmit" class="button primary" type="submit">进入工作台 <span aria-hidden="true">→</span></button><p class="login-security">登录后自动读取已配置的数据源。</p><div class="login-bottom-note"><span class="read-only-dot" aria-hidden="true"></span>真实数据 · 只读工作台</div></form></div>
+    </div>
   </section>
   <div id="appShell" hidden>
   <a class="skip-link" href="#mainContent">跳至主要内容</a>
   <header class="topbar">
     <button id="menuButton" class="icon-button" type="button" aria-label="打开导航" aria-expanded="false" aria-controls="sidebar">☰</button>
-    <a class="brand" href="#weld-weekly"><img class="brand-logo" src="assets/tuopu-logo.png" alt="TUOPU 拓普" width="116" height="39"><span>工艺部业务门户<small>PROCESS · OPERATIONS</small></span></a>
+    <a class="brand" href="#weld-live"><img class="brand-logo" src="assets/tuopu-logo.png" alt="TUOPU 拓普" width="116" height="39"><span>工艺部业务门户<small>PROCESS · OPERATIONS</small></span></a>
     <div class="header-actions"><span id="connectionBadge" class="connection-badge">检查连接中</span><button id="loginButton" class="header-button" type="button">数据源设置</button><button id="logoutButton" class="header-button" type="button" hidden>退出门户</button></div>
   </header>
   <aside id="sidebar" class="sidebar" aria-label="业务模块">
     <p class="nav-caption">业务工作台</p>
-    <nav><a class="nav-link active" href="#weld-weekly" data-route="weld-weekly"><span class="nav-symbol" aria-hidden="true">报</span><span>补焊周报<small>全线体 · 全部缺陷 · 趋势</small></span></a><a class="nav-link" href="#weld-live" data-route="weld-live"><span class="nav-symbol" aria-hidden="true">焊</span><span>补焊实时监控<small>当天累计 · 最新记录</small></span></a><a class="nav-link" href="#alarm" data-route="alarm"><span class="nav-symbol" aria-hidden="true">灯</span><span>安灯报警<small>状态 · 响应 · 责任组分析</small></span></a><a class="nav-link" href="#spares" data-route="spares"><span class="nav-symbol" aria-hidden="true">件</span><span>定位销与伸缩气缸管理<small>重点备件 · 入库文件准备</small></span></a></nav>
+    <nav><a class="nav-link active" href="#weld-live" data-route="weld-live"><span class="nav-symbol" aria-hidden="true">焊</span><span>补焊点<small>实时记录 · 日期查询 · 趋势</small></span></a><a class="nav-link" href="#alarm" data-route="alarm"><span class="nav-symbol" aria-hidden="true">灯</span><span>安灯报警<small>线体 · 部门 · 处理进度</small></span></a><a class="nav-link" href="#spares" data-route="spares"><span class="nav-symbol" aria-hidden="true">件</span><span>定位销与伸缩气缸管理<small>重点备件 · 入库文件准备</small></span></a></nav>
     <div class="sidebar-note"><strong>真实数据 · 只读查看</strong><p>已配置数据源自动读取。入库提交尚未开放。</p><span id="accountLabel">尚未登录</span></div>
   </aside>
   <button id="navBackdrop" class="nav-backdrop" aria-label="关闭导航" type="button" hidden></button>
   <main id="mainContent" tabindex="-1">
     <div class="container">
-      <div class="page-heading"><div><p class="eyebrow">工艺业务 / <span id="breadcrumb">补焊点</span></p><h1 id="pageTitle">补焊点</h1><p id="pageDescription" class="muted">查看焊接不合格日志，区分周报统计与实时监控。</p></div><a id="sourceLink" class="text-link" href="#" target="_blank" rel="noopener noreferrer" hidden>打开原系统 ↗</a></div>
+      <div class="page-heading"><div><p class="eyebrow">工艺业务 / <span id="breadcrumb">补焊点</span></p><h1 id="pageTitle">补焊点</h1><p id="pageDescription" class="muted">查看实时缺陷记录，也可按日期、产品和线体查询趋势。</p></div><a id="sourceLink" class="text-link" href="#" target="_blank" rel="noopener noreferrer" hidden>打开原系统 ↗</a></div>
       <div id="moduleNotice" class="notice info">这里显示焊接不合格日志。记录数不等于产品数，也不能据此确认已完成补焊。</div>
       <div id="sourceStatusLine" class="source-status-line" role="status"><span class="source-status-dot" aria-hidden="true"></span><span id="sourceStatusText">正在检查数据源状态…</span></div>
       <section class="filter-panel" aria-label="查询条件">
@@ -43,7 +45,6 @@
           <div class="field defect-field" id="defectField"><span>缺陷类型</span><details id="defectPicker" class="defect-picker"><summary><span id="defectSelectionLabel">全部缺陷</span><span aria-hidden="true">⌄</span></summary><div class="defect-picker-panel"><div class="defect-picker-heading"><strong>选择缺陷类型</strong><span>直接勾选，可同时选择多项</span></div><div class="defect-shortcuts"><button id="defectAll" type="button">全部缺陷</button><button id="defectWeld" type="button">焊偏＋焊穿</button><button id="defectClear" type="button">清空并恢复全部</button></div><div id="defectOptions" class="defect-options"><p>读取数据后显示可选缺陷。</p></div><div class="defect-picker-footer"><span id="defectDraftHint" aria-live="polite">全部缺陷</span><button id="applyDefects" class="button primary" type="button">应用筛选</button></div></div></details><div id="defectChips" class="defect-chips" aria-label="已选择缺陷"></div></div>
           <label class="field" id="alarmStatusField" hidden><span>报警状态</span><select id="alarmStatusFilter"><option value="all">全部状态</option></select></label>
           <label class="field" id="alarmLineField" hidden><span>产线 / 区域</span><select id="alarmLineFilter"><option value="all">全部产线 / 区域</option></select></label>
-          <label class="field" id="alarmGroupField" hidden><span>责任组</span><select id="alarmGroupFilter"><option value="all">全部责任组</option></select></label>
           <label class="field" id="alarmDepartmentField" hidden><span>部门</span><select id="alarmDepartmentFilter"><option value="all">全部部门</option></select></label>
           <label class="field keyword-field"><span>关键词</span><input id="keywordInput" type="search" autocomplete="off" placeholder="搜索当前模块记录"></label>
           <button id="queryButton" class="button primary" type="submit">查询数据</button>
