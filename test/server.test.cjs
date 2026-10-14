@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { createPortal } = require('../server.cjs');
 const { PortalError } = require('../lib/source.cjs');
 const { makeAdminConfig } = require('../lib/admin.cjs');
@@ -14,6 +16,16 @@ const QUERY = '?start=2026-10-01&end=2026-10-12&page=1&size=20';
 const CSV = '备件编号,备件名称,入库数量,库位,备注\nSYN-PIN,定位销,2,示例库位,仅预览';
 
 async function fixture(t, options = {}) {
+  const tempParent = fs.realpathSync(os.tmpdir());
+  const root = fs.mkdtempSync(path.join(tempParent, 'gongyi-server-session-'));
+  let server;
+  t.after(async () => {
+    if (server?.listening) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+    const resolved = fs.realpathSync(root);
+    assert.equal(path.dirname(resolved), tempParent);
+    assert.ok(path.basename(resolved).startsWith('gongyi-server-session-'));
+    await fs.promises.rm(resolved, { recursive: true, force: true });
+  });
   const calls = { login: [], read: [], save: [] };
   let stored = options.credentials ? { ...options.credentials } : null;
   const credentialStore = {
@@ -34,9 +46,8 @@ async function fixture(t, options = {}) {
       return { columns: [{ key: 'id', label: '示例编号' }], rows: [{ id: 'SYNTHETIC-ROW' }], total: 1, module, complete: true, sourceTotal: 1, page: query.page, size: query.size };
     }
   };
-  const server = createPortal({ config: { admin: { ...ADMIN_CONFIG }, sourceBase: 'http://synthetic-source.invalid' }, source, credentialStore, now: () => clock });
+  server = createPortal({ root, config: { admin: { ...ADMIN_CONFIG }, sourceBase: 'http://synthetic-source.invalid' }, source, credentialStore, now: () => clock });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const port = server.address().port;
   function request(method, route, data, headers = {}) {
     return new Promise((resolve, reject) => {

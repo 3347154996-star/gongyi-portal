@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>其他检具接入流程 · 工艺部业务门户</title>
+  <style>
+    :root{font-family:"Microsoft YaHei","微软雅黑","PingFang SC",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#2b3747;background:#f3f5f8;font-size:16px;line-height:1.75;--navy:#303c65;--blue:#426793;--muted:#617187;--line:#dce4ed;--soft:#edf3fa}
+    *{box-sizing:border-box}body{margin:0;min-width:280px}h1,h2,h3,p{margin-top:0}h1,h2,h3{color:#24334a;line-height:1.4}h1{font-size:clamp(27px,4.5vw,40px);margin-bottom:15px}h2{font-size:23px;margin-bottom:18px}h3{font-size:18px;margin-bottom:10px}p{margin-bottom:14px}p:last-child{margin-bottom:0}a{color:var(--blue);text-underline-offset:4px}button{font:inherit}a,button{touch-action:manipulation}:focus-visible{outline:3px solid #258aca;outline-offset:4px}code{font-family:Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}strong{color:#253b5d}
+    .skip-link{position:fixed;top:8px;left:8px;background:white;padding:8px 14px;z-index:10;transform:translateY(-160%)}.skip-link:focus{transform:none}.topbar{background:var(--navy);color:white;padding:15px 24px}.topbar-inner{max-width:1080px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap}.brand{font-weight:700;letter-spacing:.02em}.print-button{border:1px solid #ffffff66;background:#ffffff12;color:white;border-radius:7px;padding:7px 16px;min-height:42px;cursor:pointer}.print-button:hover{background:#ffffff25}
+    main{max-width:1128px;margin:auto;padding:38px 24px 48px}.hero{max-width:850px;margin-bottom:28px}.eyebrow{color:var(--muted);font-size:13px;margin-bottom:10px}.lead{font-size:18px;color:#4c5d73}.notice{border:1px solid #cedbea;border-left:4px solid #7598c2;border-radius:8px;background:var(--soft);padding:16px 19px;margin:18px 0;color:#425672}.notice strong{display:block;margin-bottom:4px}.layout{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.card{background:white;border:1px solid var(--line);border-radius:12px;padding:23px;min-width:0}.card .tag{display:inline-block;padding:3px 10px;margin-bottom:13px;border-radius:5px;font-size:12px;background:#edf3fa;color:#426793;font-weight:700}.card .tag.pending{background:#f5f0e4;color:#78633c}.card p{color:#526278}.card ul{padding-left:21px;margin:12px 0 0}.card li+li{margin-top:7px}.caption{font-size:13px;color:var(--muted)}.anchor-nav{display:flex;flex-wrap:wrap;gap:10px;margin:25px 0 32px}.anchor-nav a{display:inline-flex;align-items:center;min-height:42px;padding:8px 15px;background:white;border:1px solid var(--line);border-radius:7px;text-decoration:none;font-size:14px}.anchor-nav a:hover{background:var(--soft)}section{scroll-margin-top:20px;margin-bottom:35px}.section-intro{color:var(--muted);max-width:850px}
+    .status-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.status-item{background:white;border:1px solid var(--line);border-radius:8px;padding:17px 19px;min-width:0}.status-item h3{font-size:16px;margin-bottom:6px}.status-item p{font-size:14px;color:#53637a}.status-label{font-size:12px;color:#526f92;display:block;margin-bottom:5px}.status-label.pending{color:#806a40}
+    .steps{list-style:none;padding:0;margin:0;display:grid;gap:15px}.step{display:grid;grid-template-columns:44px minmax(0,1fr);gap:16px;background:white;border:1px solid var(--line);border-radius:10px;padding:23px}.number{display:flex;align-items:center;justify-content:center;align-self:start;width:40px;height:40px;border-radius:9px;background:#edf2fa;color:var(--navy);font-size:20px;font-weight:700}.owner{font-size:12px;color:#637b99;margin-bottom:5px}.step h3{margin-bottom:10px}.step ul{padding-left:20px;margin:10px 0}.step li{margin-bottom:5px}.deliverable{border-top:1px solid #e8edf3;padding-top:10px;margin-top:14px;font-size:14px;color:#496485}.checklist{list-style:none;padding:0;margin:0;display:grid;gap:10px}.checklist li{position:relative;padding-left:28px}.checklist li::before{content:"□";position:absolute;left:0;top:0;color:#607c9f;font-size:20px;line-height:1.3}.checks{background:white;border:1px solid var(--line);border-radius:10px;padding:24px}
+    .form-sheet{background:white;border:1px solid var(--line);border-radius:10px;padding:22px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 22px}.field{min-width:0}.field.full{grid-column:1/-1}.field-label{display:block;font-size:14px;font-weight:700;margin-bottom:5px;color:#415671}.entry{min-height:43px;outline-offset:3px;border:1px solid #d8e1ed;border-radius:6px;background:#fafcff;padding:7px 10px;white-space:pre-wrap;overflow-wrap:anywhere;color:#263a56}.entry:empty::before{content:attr(data-placeholder);color:#8b98a9;font-size:13px;pointer-events:none}.entry.multiline{min-height:74px}.limits{border-top:1px solid var(--line);padding-top:25px}.limits p{font-size:14px;color:#617187}.footer{font-size:12px;color:#748194;margin-top:28px}ul,ol{overflow-wrap:anywhere}
+    @media(max-width:650px){.topbar{padding:12px 16px}.brand{font-size:14px}.print-button{font-size:13px;padding:6px 12px}main{padding:26px 16px 35px}.lead{font-size:16px}.layout,.status-list,.form-grid{grid-template-columns:1fr}.field.full{grid-column:auto}.card{padding:19px}.step{grid-template-columns:33px minmax(0,1fr);gap:11px;padding:18px 15px}.number{width:32px;height:32px;font-size:17px}h2{font-size:21px}h3{font-size:17px}.checks,.form-sheet{padding:19px 16px}.anchor-nav{gap:7px}.anchor-nav a{padding:7px 12px;font-size:13px}.notice{padding:14px 15px}}
+    @media print{@page{size:A4;margin:14mm}body{background:white;font-size:10pt;line-height:1.55}.topbar,.anchor-nav,.skip-link,.screen-only{display:none!important}main{max-width:none;padding:0}.hero{max-width:none;margin-bottom:14px}h1{font-size:24pt}h2{font-size:17pt;break-after:avoid}h3{font-size:12pt;break-after:avoid}.lead{font-size:11pt}.layout,.status-list,.form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card,.status-item,.step,.checks,.form-sheet,.notice{box-shadow:none;border:1px solid #bac5d3;background:white;padding:12px;break-inside:avoid}.step{grid-template-columns:28px minmax(0,1fr);gap:10px}.number{width:27px;height:27px;font-size:13pt;border:1px solid #bac5d3;background:white}.steps{gap:10px}.owner,.caption,.status-label,.footer{font-size:9pt}.card .tag{padding:0;background:white}.status-item p,.deliverable,.limits p,.field-label{font-size:10pt}.field.full{grid-column:1/-1}.entry{background:white;min-height:26px;border:0;border-bottom:1px solid #a9b6c8;border-radius:0;padding:3px 0}.entry:empty::before{content:""}.entry.multiline{min-height:45px}.form-sheet{break-inside:auto}.field{break-inside:avoid}section{margin-bottom:20px}.notice strong{color:#253b5d}a{color:inherit;text-decoration:none}.limits{padding-top:16px}}
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到指南正文</a>
+  <header class="topbar"><div class="topbar-inner"><span class="brand">工艺部业务门户 · 接入指南</span><button class="print-button" id="printGuide" type="button">打印 / 保存为 PDF</button></div></header>
+  <main id="main">
+    <header class="hero">
+      <p class="eyebrow">现场负责人 · 门户管理员 · 维护人员 · 生产网络 IT ｜ 2026-10-14</p>
+      <h1>其他检具接入流程</h1>
+      <p class="lead">先收集资料与登记，再由维护人员适配。单台在最终服务器上验证通过后，分批接入其他检具。</p>
+      <div class="notice"><strong>登记不等于接通</strong>“登记检具”保存的是待配置台账。卡片出现后，不会自动创建采集程序、读取新共享或产生检测结果；待配置设备没有虚构数据。</div>
+    </header>
+
+    <section id="deployment" aria-labelledby="deploymentTitle">
+      <h2 id="deploymentTitle">部署后，现有连接方式还能用吗？</h2>
+      <div class="layout">
+        <article class="card"><span class="tag">厂内 Windows 部署</span><h3>满足网络和权限条件，可继续读共享</h3><p>检具持续生成采集结果，由最终门户服务器读取授权的只读共享。手机和浏览器通过网页查看，无需直接连接 SMB。</p><ul><li>验证最终服务器到检具的网络路径。</li><li>确认实际运行门户服务的账号能读取文件。</li><li>验收重启后的采集、认证和服务恢复。</li></ul></article>
+        <article class="card"><span class="tag pending">公网云 / 生产网络之外</span><h3>需要另做上传或 IT 专用网络</h3><p>云服务器不能直接访问厂内私有地址共享。可由维护人员开发 HTTPS 主动上传，或由 IT 提供受控专用网络。</p><ul><li>上传需要设备鉴权、断线重试和去重。</li><li><strong>上传链路当前尚未实现。</strong></li><li>不要把 SMB 的 445 端口直接开放到公网。</li></ul></article>
+      </div>
+      <p class="caption" style="margin-top:12px">部署形式尚未确定。本指南不预设迁移方案；原电脑能读到，不代表换服务器后也能读到。</p>
+    </section>
+
+    <nav class="anchor-nav" aria-label="指南目录"><a href="#migration">换服务器怎么办</a><a href="#scope">当前能力</a><a href="#steps">七步接入</a><a href="#acceptance">单台验收</a><a href="#worksheet">填写信息表</a><a href="#limits">前提与局限</a></nav>
+
+    <section id="migration" aria-labelledby="migrationTitle">
+      <h2 id="migrationTitle">如果放到厂内服务器，需要重新配置什么？</h2>
+      <p class="section-intro">换服务器需部署和验收服务器这一侧。<strong>共享读取方式、检具输出和共享路径都不变时，检具端采集程序通常不用改。</strong>由服务器主动读共享，服务器地址变化不要求检具向新地址发送数据；同事通过新的网页地址访问。</p>
+      <div class="checks"><h3>由维护人员与 IT 执行的迁移清单</h3><p class="caption">部署地点尚未确定，以下是条件与交付要求，当前未实施这些操作。</p><ul class="checklist"><li>在新服务器部署门户程序、运行环境，确定实际服务账号。</li><li>在维护时段停止原门户写入并备份；目标已有数据时也先停止相关服务并备份。迁移已保存的 <code>runtime</code> 业务数据，核对数量、登记和配置，避免空目录或默认文件覆盖已有数据。</li><li>保留原检具设备编号和来源归属，现有 <code>vision-01</code> 继续使用。</li><li>共享位置未变时可沿用同一路径，但须在新服务器、实际服务账号下重新验证网络、共享及文件权限。</li><li>共享凭据不会随代码自动迁移。由 IT 在新服务器本机配置，密码由授权人员自己填写，不放进文档或聊天。</li><li>配置并验证开机启动、重启后的认证和读取，确认检具原有持续采集正常。</li><li>按用户访问范围配置网页监听、限定的防火墙规则及 HTTPS，从同事的电脑或手机实际访问验收。</li><li>比对历史记录、设备归属、最新检测和页面状态，通过后再切换网页地址，保留可恢复备份。</li></ul></div>
+      <div class="notice"><strong>如果只是让同事访问当前电脑</strong>不需要因此重配检具采集。维护人员需单独处理网页监听、访问范围、防火墙和 HTTPS，并从其他电脑验收。当前服务仅监听本机回环地址，只能确认本机可用，尚不能宣称已在局域网开放。</div>
+    </section>
+
+    <section id="scope" aria-labelledby="scopeTitle">
+      <h2 id="scopeTitle">当前已完成什么，还需要适配什么？</h2>
+      <div class="status-list">
+        <article class="status-item"><span class="status-label">已有接入</span><h3>前副车架 Front11 / Front12</h3><p>已适配 Tesla_Front11、Tesla_Front12 普通检测的 61 项数据及共享读取。实时情况以页面状态和最后扫描时间为准。</p></article>
+        <article class="status-item"><span class="status-label">管理入口</span><h3>线体、检具选择与待配置登记</h3><p>保留现有前副车架入口；管理员可登记新设备、接入意向和资料。登记本身不启用数据连接。</p></article>
+        <article class="status-item"><span class="status-label pending">新设备需单独配置</span><h3>现有 v2 包不能直接复制给多台</h3><p>现有免安装包固定使用 <code>vision-01</code>，编号保留给现有检具。新设备需唯一编号及专用配置包，不能只改 IP。</p></article>
+        <article class="status-item"><span class="status-label pending">尚未实现</span><h3>多来源、新格式与主动上传</h3><p>当前仅有一个 <code>dataFile</code> 自动读取入口；多来源汇集、其他型号与测点结构的通用解析，以及 HTTPS 上传仍需开发验证。</p></article>
+      </div>
+      <div class="notice"><strong>范围与容量一起确认</strong>只采集普通 <code>backup</code>，排除 <code>_ALLmeasure</code> 与 <code>failure</code>；结果写到独立的 <code>data/vision.json</code>。当前单批输入及门户已存记录最多 20,000 条，输入及存储文件最多 128 MB，两类上限同时适用，不是每台各有一份容量。</div>
+      <p class="section-intro">文件有效、无采集错误且仍可读，但扫描时间超过默认 2 小时，页面显示“共享可读取，等待采集更新”，继续提供查询和自动刷新。读取失败、内容损坏或采集报错仍显示真实异常；等待提示不能证明采集仍在运行。</p>
+    </section>
+
+    <section id="steps" aria-labelledby="stepsTitle">
+      <h2 id="stepsTitle">七步接入：每一步都留下可核对的结果</h2>
+      <ol class="steps">
+        <li class="step"><span class="number" aria-hidden="true">1</span><div><p class="owner">现场负责人</p><h3>收集设备资料和真实样例</h3><ul><li>列出线体、检具名称、型号、台数，一台填一张信息表。</li><li>确认结果软件、普通 backup 路径、日期目录及文件名结构；相机图像和点云不能代替检测结果。</li><li>准备正常与实际 NG 样例；有缺测、复检等情况时，补对应真实样例。没有的情况标“待补样”，不编造。</li><li>将设备地址、网络区域和现场、IT 联系人交给授权维护人员。</li></ul><p class="deliverable">交付：设备资料表、实际样例和待确认事项。</p></div></li>
+        <li class="step"><span class="number" aria-hidden="true">2</span><div><p class="owner">门户管理员</p><h3>登记检具，分配唯一设备编号</h3><p>在“视觉检具 → 登记检具”填写线体名、检具名、编号、共享或上传方式、路径、型号、测点数及备注。路径不确定时标为待维护确认，选择上传只代表计划。</p><ul><li><code>vision-01</code> 保留给现有检具；新设备使用新编号。</li><li>一机一号，后续升级或改 IP 保持原编号。</li><li>不要在任何登记字段中填写密码。</li></ul><p class="deliverable">交付：待配置台账。出现卡片或选择项不表示已经接通。</p></div></li>
+        <li class="step"><span class="number" aria-hidden="true">3</span><div><p class="owner">维护人员，必要时联系供应商</p><h3>验证数据格式，生成设备专用配置包</h3><p>核对实际型号、测点数量和名称、SN、时间、数值、缺测写法与整体、逐项判定。单位或判定规则不清楚时先查证。</p><p>每台包绑定自己的编号、源目录和输出目录。其他型号不能套用现有 61 项规则；现有 v2 包也不能直接复制用于多机。</p><p>新增第二个自动来源前，需先完成多来源读取或汇集；用新路径覆盖现有 <code>dataFile</code> 并不等于同时接入两台。</p><p class="deliverable">交付：已验证样例、专用采集包及服务端接入方案；未适配设备保持待配置。</p></div></li>
+        <li class="step"><span class="number" aria-hidden="true">4</span><div><p class="owner">现场人员与生产网络 IT</p><h3>持续采集，只共享独立结果目录</h3><p>按专用包说明先采集一次，再启动持续采集并保持运行。输出目录位于源 backup 之外，由程序生成 <code>data/vision.json</code>；只共享结果文件夹。</p><p>IT 核对共享和文件权限，必要时建立专用非管理员读取账号。密码由用户在 Windows 中自行输入，不发聊天，不写进脚本或页面。检具生产程序原有写入权限需保留。</p><p>跨网段访问由 IT 核对；同一 Wi-Fi 不保证可达。现有 v2 默认输出今天和昨天，补历史需另行规划容量。</p><p class="deliverable">交付：更新中的输出文件、授权读取方式和运行负责人。</p></div></li>
+        <li class="step"><span class="number" aria-hidden="true">5</span><div><p class="owner">维护人员与生产网络 IT</p><h3>在最终部署服务器上验证</h3><p>使用门户服务实际运行的身份读取共享，核对文件更新、扫描时间和错误状态。个人电脑能打开文件夹，不代表服务账号可读。</p><p>厂内 Windows 由服务器读共享、浏览器看网页；云部署先完成上传或专用网络方案，当前没有现成上传开关可启用。</p><p class="caption">路径仅作占位示意：<code>\\&lt;检具主机名或地址&gt;\&lt;采集结果共享名&gt;\vision.json</code>，不能照抄。</p><p class="deliverable">交付：最终服务器、最终服务账号下通过的读取或接收记录。</p></div></li>
+        <li class="step"><span class="number" aria-hidden="true">6</span><div><p class="owner">现场负责人和维护人员</p><h3>先验收一台，包含重启恢复</h3><p>按下方验收表比对原软件与网页，并检查新检测更新、复检去重、来源不串数据。维护时段内验证检具与门户服务器重启后的采集、网络、认证和服务恢复。</p><p>缺少某类实际样例时记录“待验证”；没有做过重启测试时，不宣称可无人值守长期运行。</p><p class="deliverable">交付：有日期、责任人及未完成项的单台验收记录。</p></div></li>
+        <li class="step"><span class="number" aria-hidden="true">7</span><div><p class="owner">门户管理员，现场与维护人员共同确认</p><h3>分批启用其他检具</h3><p>单台验收通过、多来源能力完成后，再按线体分批启用。每台保留唯一编号、专用配置和验收记录；每批复核来源、最近更新和整体容量。</p><p class="deliverable">交付：逐台确认的接入清单。未完成适配的设备继续待配置。</p></div></li>
+      </ol>
+    </section>
+
+    <section id="acceptance" aria-labelledby="acceptanceTitle">
+      <h2 id="acceptanceTitle">单台验收清单</h2>
+      <div class="checks"><ul class="checklist"><li>同一 SN 的时间、整体 OK/NG、测点名称、数量和关键数值与原软件一致。</li><li>逐项 NG 与整体判定分别保留，测点合格率不替代零件合格率。</li><li>重复文件不重复计数，同 SN 不同时间的复检可区分。</li><li>切换线体、检具后来源正确，多台同 SN 不会串数据。</li><li>新增实际检测后，采集输出、扫描时间、网页记录依次更新。</li><li>采集暂停或共享不可读时显示相应等待或异常，旧数据不被当作最新。</li><li>已在维护时段验证两端重启后的采集、网络、认证与服务恢复。</li><li>无实际样例的 NG、缺测等情况标为待验证；容量、历史保留和联系人已确认。</li></ul></div>
+    </section>
+
+    <section id="worksheet" aria-labelledby="worksheetTitle">
+      <h2 id="worksheetTitle">一台检具一张：接入信息表</h2>
+      <p class="section-intro">可点击空白处填写后打印，也可直接打印手写。<strong>本表不会保存到门户，刷新后内容可能丢失。</strong>正式登记请使用管理员“登记检具”入口。密码不在本表收集，网络信息仅交给授权人员。</p>
+      <div class="form-sheet"><div class="form-grid">
+        <div class="field"><span class="field-label" id="fieldLine">线体名称 / 所属区域</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldLine" data-placeholder="点击填写"></div></div>
+        <div class="field"><span class="field-label" id="fieldDevice">检具名称 / 本批接入台数</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldDevice" data-placeholder="点击填写"></div></div>
+        <div class="field"><span class="field-label" id="fieldId">唯一设备编号（管理员确认）</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldId" data-placeholder="现有 vision-01 不重复使用"></div></div>
+        <div class="field"><span class="field-label" id="fieldSoftware">检具软件名称及版本</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldSoftware" data-placeholder="点击填写"></div></div>
+        <div class="field"><span class="field-label" id="fieldPart">普通检测型号</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldPart" data-placeholder="按实际文件填写"></div></div>
+        <div class="field"><span class="field-label" id="fieldCount">实际测点数 / 关键点数</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldCount" data-placeholder="未确认时写待核对"></div></div>
+        <div class="field full"><span class="field-label" id="fieldBackup">普通 backup 路径及日期目录结构</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldBackup" data-placeholder="由现场填写，不填密码"></div></div>
+        <div class="field"><span class="field-label" id="fieldSamples">正常 / NG / 异常样例是否齐全</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldSamples" data-placeholder="缺少的样例标待补"></div></div>
+        <div class="field"><span class="field-label" id="fieldMeaning">SN、检测时间及单位是否确认</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldMeaning" data-placeholder="列出待确认项"></div></div>
+        <div class="field"><span class="field-label" id="fieldAddress">检具地址 / 生产网络区域</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldAddress" data-placeholder="仅交给授权维护人员"></div></div>
+        <div class="field"><span class="field-label" id="fieldMode">接入意向：共享 / 上传 / 待确认</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldMode" data-placeholder="上传功能当前未实现"></div></div>
+        <div class="field full"><span class="field-label" id="fieldOutput">独立输出目录 / 结果共享路径</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldOutput" data-placeholder="未确定时写待维护确认"></div></div>
+        <div class="field"><span class="field-label" id="fieldServer">最终服务器位置及部署形式</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldServer" data-placeholder="厂内 Windows / 云端 / 待定"></div></div>
+        <div class="field"><span class="field-label" id="fieldPermission">读取权限负责人（不填密码）</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldPermission" data-placeholder="填写负责人"></div></div>
+        <div class="field"><span class="field-label" id="fieldPeople">现场联系人 / 生产网络 IT 联系人</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldPeople" data-placeholder="按公司要求填写"></div></div>
+        <div class="field"><span class="field-label" id="fieldMaintainer">维护人员 / 采集包版本</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldMaintainer" data-placeholder="点击填写"></div></div>
+        <div class="field full"><span class="field-label" id="fieldAcceptance">单台验收日期 / 重启恢复结果</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldAcceptance" data-placeholder="未验证时如实注明"></div></div>
+        <div class="field full"><span class="field-label" id="fieldNotes">待补资料、待验证情况及备注</span><div class="entry multiline" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="fieldNotes" data-placeholder="不填写账号密码"></div></div>
+      </div></div>
+    </section>
+
+    <section class="limits" id="limits" aria-labelledby="limitsTitle"><h2 id="limitsTitle">前提条件与局限性</h2><p>本流程以获得授权、提供实际检测结果样例，以及现场、维护人员和 IT 能够配合为前提。已适配的前副车架接入不代表任意品牌、型号或台数都能直接使用。登记不会突破当前单来源、格式及容量限制。</p><p>部署形式确定后，需在最终环境重新验收。本指南是接入分工与交付说明，不代表已完成其他设备的数据连接、多来源接口、上传接口或开机自动启动。</p></section>
+    <footer class="footer">工艺部业务门户 · 其他检具接入指南 ｜ 本页可独立打开和打印，不发送或保存填写内容。<span class="screen-only"> 浏览器也可使用“打印”功能保存为 PDF。</span></footer>
+  </main>
+  <script>document.getElementById('printGuide').addEventListener('click', function () { window.print(); });</script>
+</body>
+</html>

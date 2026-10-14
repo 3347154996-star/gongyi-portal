@@ -3,6 +3,10 @@
   "sourceBase": "http://YOUR_COMPANY_WEB:PORT",
   "loginToken": "REQUEST_FROM_YOUR_SYSTEM_ADMIN",
   "port": 4173,
+  "vision": {
+    "dataFile": "runtime/vision-input.json",
+    "maxScanAgeSeconds": 7200
+  },
   "maxPages": 50,
   "language": "0",
   "materialGroups": {
@@ -11,7 +15,14 @@
   },
   "weldLineFields": ["productionLine", "lineName", "line"],
   "weldLineRules": [],
+  "weldMaterialNames": [],
   "alarmDepartmentRules": [],
   "alarmDepartments": [],
-  "alarmLineRules": []
+  "alarmLineRules": [],
+  "inventoryConnection": {
+    "profile": "power-mold",
+    "warehouseKey": "gongyi-spares",
+    "label": "工艺部备件库",
+    "writes": { "inbound": false, "outbound": false, "adjust": false }
+  }
 }

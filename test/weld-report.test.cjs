@@ -10,6 +10,51 @@ function row(overrides = {}) {
 }
 const period = { startDate: '2026-10-12', endDate: '2026-10-18' };
 
+test('exact material-name filtering spans codes and keeps charts, trends, detail and available lines aligned', () => {
+  const name = String.raw`合成料号\后副（海外版）`;
+  const rows = [row({ id: 'A1', '物料编码': 'FRONT_PRIMARY', item_name: ` ${name} ` }),
+    row({ id: 'A2', '物料编码': 'REAR_PRIMARY', item_name: name, '二维码': 'SYN12A001' }),
+    row({ id: 'SIMILAR', '物料编码': 'FRONT_PRIMARY', item_name: `${name}加长版`, '二维码': 'SYN13A001' }),
+    row({ id: 'OLD', item_name: name, '录入时间': '2026-10-11 12:00:00' }),
+    row({ id: 'UNNAMED', '二维码': 'SYN14A001' })];
+  const before = JSON.stringify(rows);
+  const report = weld.buildWeldDashboard(rows, { ...period, materialName: ` ${name} `, fieldMap: { materialName: 'item_name' } });
+  assert.equal(report.selected.materialName, name);
+  assert.deepEqual(report.filteredRows.map(item => item.id), ['A1', 'A2']);
+  assert.equal(report.overview.recordCount, 2);
+  assert.equal(report.overview.pieceCount, 2);
+  assert.equal(report.materialSummary.length, 2);
+  for (const values of [report.lineSummary, report.lineOpSummary, report.defectSummary, report.topLocations, report.dailyTrend, report.trend]) {
+    assert.equal(values.reduce((sum, item) => sum + (item.recordCount || 0), 0), 2);
+  }
+  assert.deepEqual(report.options.lines.map(item => item.value), ['all', '11线前副', '12线后副']);
+  assert.deepEqual(report.options.materialNames, [{ value: 'all', label: '全部物料', count: 4 },
+    { value: name, label: name, count: 2 }, { value: `${name}加长版`, label: `${name}加长版`, count: 1 }]);
+  assert.equal(weld.buildWeldDashboard(rows, { ...period, materialName: name, product: 'front', fieldMap: { materialName: 'item_name' } }).overview.recordCount, 1);
+  assert.equal(JSON.stringify(rows), before);
+});
+
+test('configured material names retain order and absent choices without restricting all-material totals', () => {
+  const materialNames = ['合成物料丙', '合成物料甲', '合成物料乙', '合成物料丁', '合成物料戊'];
+  const rows = [row({ '物料名称': '合成物料甲' }), row({ '物料名称': '配置以外的物料' }), row()];
+  const report = weld.buildWeldDashboard(rows, { ...period, materialNames, sourceComplete: true });
+  assert.equal(report.overview.recordCount, 3);
+  assert.deepEqual(report.options.materialNames.map(item => item.value), ['all', ...materialNames]);
+  assert.deepEqual(report.options.materialNames.map(item => item.count), [3, 0, 1, 0, 0, 0]);
+  const empty = weld.buildWeldDashboard(rows, { ...period, materialNames, materialName: '合成物料丙', sourceComplete: true });
+  assert.equal(empty.overview.recordCount, 0);
+  assert.deepEqual(empty.filteredRows, []);
+  assert.deepEqual(empty.options.materialNames, report.options.materialNames);
+  assert.deepEqual(empty.options.lines, [{ value: 'all', label: '全部线体', count: 0 }]);
+  const partial = weld.buildWeldDashboard(rows, { ...period, materialNames, sourceComplete: false });
+  assert.equal(partial.options.materialNames[1].count, null);
+  assert.equal(partial.options.materialNames[2].count, 1);
+  const dynamic = weld.buildWeldDashboard(rows, { ...period, materialNames: [], sourceComplete: true });
+  assert.deepEqual(dynamic.options.materialNames, weld.buildWeldDashboard(rows, { ...period, sourceComplete: true }).options.materialNames);
+  assert.equal(dynamic.options.materialNames.length, 3);
+  assert.throws(() => weld.buildWeldDashboard([], { materialNames: '合成物料甲' }), /array/);
+});
+
 test('verified product materials stay separate and filter exactly two defects', () => {
   const report = weld.buildWeldReport([
     row(), row({ '物料编码': 'FRONT_SECONDARY' }), row({ '物料编码': 'REAR_PRIMARY' }),
@@ -159,7 +204,7 @@ test('dashboard defaults to all materials, lines and defects, including missing 
     row({ '物料编码': '', '二维码': 'unrecognized', '缺陷内容': '外观待判' })
   ];
   const result = weld.buildWeldDashboard(rows, period);
-  assert.deepEqual(result.selected, { product: 'all', line: 'all', defects: [], defectType: 'all', op: 'all', location: 'all' });
+  assert.deepEqual(result.selected, { product: 'all', materialName: 'all', line: 'all', defects: [], defectType: 'all', op: 'all', location: 'all' });
   assert.equal(result.overview.recordCount, 4);
   assert.equal(result.overview.pieceCount, 3);
   assert.equal(result.overview.materialCount, 3);

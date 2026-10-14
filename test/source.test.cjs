@@ -6,6 +6,22 @@ const config={apiBase:'http://example.invalid',loginToken:'',materialGroups:{fro
 const response=data=>({ok:true,status:200,json:async()=>data});
 const q=(extra={})=>({start:'2026-09-21',end:'2026-09-27',view:'weekly',page:1,size:50,keyword:'',category:'all',...extra});
 const row=(i)=>({id:i,barcode:`DEMO-${i}-11A001`,item_code:'FRONT_PRIMARY',item_name:'Synthetic fixture',badness_location_name:'TSL-01-OP010-A',badness_content:'焊偏',create_time:'2026-09-25 12:00:00'});
+test('material-name query and configured choices reach the report before detail pagination',async()=>{
+  const name=String.raw`合成编号\后副（海外版）`;
+  const data=[{...row(1),item_name:` ${name} `},{...row(2),item_code:'OTHER_PART',item_name:name},
+    {...row(3),item_name:`${name}加长版`},{...row(4),item_name:'另一合成物料'}];
+  const source=createSource({...config,weldMaterialNames:['合成未观测物料',name]},async()=>response({code:0,total:data.length,data}));
+  const parsed=parseQuery(new URLSearchParams({start:'2026-09-21',end:'2026-09-27',materialName:` ${name} `,page:'2',size:'1'}),'weld');
+  assert.equal(parsed.materialName,name);
+  const result=await source.read('weld',parsed,{token:'mock'});
+  assert.equal(result.total,2);assert.equal(result.rows.length,1);assert.equal(result.rows[0].id,2);
+  assert.equal(result.report.overview.recordCount,2);assert.equal(result.report.selected.materialName,name);
+  assert.deepEqual(result.report.options.materialNames,[{value:'all',label:'全部物料',count:4},
+    {value:'合成未观测物料',label:'合成未观测物料',count:0},{value:name,label:name,count:2}]);
+  assert.equal(result.report.dailyTrend.reduce((sum,item)=>sum+(item.recordCount||0),0),2);
+  assert.equal(parseQuery(new URLSearchParams(),'weld').materialName,'all');
+  assert.throws(()=>parseQuery(new URLSearchParams({materialName:'X'.repeat(501)}),'weld'),/筛选内容过长/);
+});
 test('login uses source client protocol and business token, not alternate client token',async()=>{
   let sent;const source=createSource(config,async(url,options)=>{sent={url,options};return response({code:0,data:{token:'mock-business-session',access_token:'mock-other-session'}});});
   assert.deepEqual(await source.login('mock-user','mock-password'),{account:'mock-user',token:'mock-business-session'});
