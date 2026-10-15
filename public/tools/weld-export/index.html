@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>焊接程序参数导出工具（多任务机器人备份）</title>
+<link rel="stylesheet" href="style.css"><link rel="stylesheet" href="../shared.css">
+</head>
+<body><nav class="tool-shell" aria-label="工具导航"><a href="../../#tools" data-portal-return>← 返回工具中心</a><span class="tool-brand">工艺部 · 工具中心</span><span class="tool-local">浏览器内处理 · 文件不上传</span></nav>
+<header>
+  <h1>焊接程序参数导出工具 · 多任务机器人备份</h1>
+  <p>导入机器人备份，按任务筛选焊接程序，导出当前视图中的参数。</p>
+</header>
+<div class="wrap">
+
+<div class="card">
+  <h2><span class="num">1</span>导入备份文件夹</h2>
+  <div class="filebox" id="dropbox" role="button" tabindex="0" aria-label="选择机器人备份文件夹">
+    <b>点击选择文件夹</b>（或把整个备份文件夹拖到这里）<br>
+    <span class="hint">读取 .mod / .sys 文本文件，按 TASK 分组；默认只检索主程序正在使用（启用）的焊接程序</span>
+    <input type="file" id="dirInput" webkitdirectory directory multiple style="display:none">
+    <input type="file" id="fileInput" multiple accept=".mod,.sys,.txt" style="display:none">
+  </div>
+  <div class="row" style="margin-top:10px;">
+    <button class="sec" id="selectFiles">或：选择单个/多个文件</button>
+    <button class="sec" id="resetImport" type="button">清空，重新导入</button>
+    <button class="sec" id="jumpToResults" type="button" hidden>查看参数结果 ↓</button>
+    <span class="hint" id="impMsg" role="status" aria-live="polite">尚未导入</span>
+  </div>
+  <div id="taskInfo" class="hint"></div><div class="tool-scope"><p>支持 ABB RAPID 的 .mod / .sys / .txt；单文件最多 16 MB、合计最多 64 MB。</p><p>保留原工具的 welddata 换算规则。结果用于核对与导出，实际焊机单位和程序状态须结合设备配置确认。</p></div>
+</div>
+
+<div class="card" id="weldCalls" hidden>
+  <h2><span class="num">2</span>主程序调用（整合 TASK1 / TASK2）</h2>
+  <div class="hint" style="margin-bottom:6px;">两个任务 MainModule 的焊接调用：触发信号 → 调用的焊接程序。点「调出参数」查看该程序的焊接参数。</div>
+  <div id="callOverview"><div class="empty">导入后显示</div></div>
+</div>
+
+<div class="card" id="weldFilters" hidden>
+  <h2><span class="num">3</span>筛选（可选）</h2>
+  <div class="row">
+    <label for="taskSel">任务：</label>
+    <select id="taskSel"><option value="">全部</option></select>
+    <label for="kw" style="margin-left:8px;">关键词：</label>
+    <input type="text" aria-label="程序名、焊接数据名或标签" id="kw" placeholder="程序名 / 焊接数据名 / !标签 模糊筛选（留空＝全部）">
+    <label style="margin-left:8px;"><input type="checkbox" id="onlyMiss"> 只看未取到参数的段</label>
+    <label style="margin-left:8px;"><input type="checkbox" id="showAll"> 显示全部（含被注释/未引用）</label>
+    <span class="hint">默认只检索正在使用（主程序启用、未被 ! 备注）的焊接程序</span>
+  </div>
+  <div id="proclist"></div>
+</div>
+
+<div class="card" id="weldResults" tabindex="-1" hidden>
+  <h2><span class="num">4</span>焊接参数</h2><div class="hint" id="autoHint">导入后自动检索【正在使用】的焊接程序（主程序启用、未被 ! 备注）及其焊接参数</div>
+  <div id="resHead"><div class="empty">请先导入备份文件夹并查找程序号</div></div>
+  <div id="resStats"></div>
+  <div id="resTable"></div>
+  <div class="bar" id="resBar" style="display:none;">
+    <button id="exportExcel">⬇ 导出 Excel（.xlsx，多表）</button>
+    <button class="sec" id="exportCSV">导出 CSV</button>
+    <button class="sec" id="copyTSV">复制到剪贴板</button>
+    <span class="hint" id="expMsg" role="status" aria-live="polite"></span>
+  </div>
+</div>
+
+<details class="card tool-help">
+  <summary>使用说明与解析规则</summary>
+  <div class="note" style="background:#fff;border-left-color:#305496;color:#1f2733;">
+  <h3 style="margin:0 0 8px;color:#1F3864;font-size:14px;">一、怎么用</h3>
+  <ol style="line-height:1.9;margin:0 0 6px;">
+    <li>点「选择文件夹」导入机器人备份（含 RAPID 的整个备份文件夹即可）。</li>
+    <li>工具自动按 TASK 分组，<b>默认只检索「正在使用」的焊接程序</b>（主程序启用、未被 ! 备注），列出其焊接段参数；勾选「显示全部」可查看被注释/未引用的程序。</li>
+    <li>用「筛选」按 任务 / 关键词 / 主程序状态 缩小范围（可选）。</li>
+    <li>点「导出 Excel / CSV」或「复制到剪贴板」取得结果（导出内容＝当前视图）。</li>
+  </ol>
+  <h3 style="margin:12px 0 8px;color:#1F3864;font-size:14px;">二、解析规则</h3>
+  <ul style="line-height:1.9;margin:0 0 6px;">
+    <li><b>焊接过程</b>：文件里含活动 <span class="mono">ArcLStart</span> 的 <span class="mono">PROC…ENDPROC</span> 段；以 <span class="mono">!</span> 开头的行是注释，不算。</li>
+    <li><b>焊接段</b>：一条 <span class="mono">ArcLStart</span> 到对应的 <span class="mono">ArcLEnd/ArcCEnd</span>。</li>
+    <li><b>焊缝号(备注)</b>：段前（跨过准备动作与被注释代码）遇到的第一条 <span class="mono">!注释</span>；没有则显示“未标注”。</li>
+    <li><b>任务</b>：按路径里的 <span class="mono">TASK数字</span> 分组；变位机等无焊接指令的任务自动忽略。</li>
+    <li><b>主程序状态</b>：读 <span class="mono">MainModule.mod</span>——行首无 <span class="mono">!</span> 的 <span class="mono">WL_…;</span> 为“调用(启用)”；有 <span class="mono">!</span> 为“注释”；未出现为“未引用”。</li>
+  </ul>
+  <h3 style="margin:12px 0 8px;color:#1F3864;font-size:14px;">三、welddata 参数换算</h3>
+  <span class="mono">TASK PERS welddata 名称:=[速度, 0, [焊接模式, ?, 电压, 电流, …], …];</span><br>
+  · <b>速度(IPM) = [0] × 2.362203794</b>　　· <b>电压(V) = [2][2]</b>（直接用）　　· <b>电流(A) = [2][3] × 2.362204724</b><br>
+  · 参数来源优先取<b>同一任务</b>内声明该 welddata 的文件；跨任务同名(如 weld1)按任务隔离。
+  </div>
+</details>
+</div>
+<script src="../vendor/jszip.min.js"></script><script src="../xlsx-export.js"></script>
+<script src="../bridge.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

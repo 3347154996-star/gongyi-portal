@@ -3,22 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#20478f">
+  <meta name="theme-color" content="#2456a6">
   <title>工艺部业务门户</title>
   <link rel="stylesheet" href="styles.css?v=20261013-materials">
-  <link rel="stylesheet" href="inventory.css?v=20261013-1">
-  <link rel="stylesheet" href="vision.css?v=20261014-fleet">
+  <link rel="stylesheet" href="inventory.css?v=20261015">
+  <link rel="stylesheet" href="vision.css?v=20261015">
+  <link rel="stylesheet" href="tools.css?v=20261015">
+  <link rel="stylesheet" href="portal-theme.css?v=20261015">
   <script src="vendor/jsQR.js" defer></script>
   <script src="vendor/qrcode.js" defer></script>
   <script src="vendor/qrcode_UTF8.js" defer></script>
-  <script src="inventory.js?v=20261013-1" defer></script>
-  <script src="vision.js?v=20261014-fleet" defer></script>
-  <script src="app.js?v=20261014-fleet" defer></script>
+  <script src="workbench-utils.js?v=20261015" defer></script>
+  <script src="inventory.js?v=20261015" defer></script>
+  <script src="vision.js?v=20261015" defer></script>
+  <script src="portal-state.js?v=20261015" defer></script>
+  <script src="tools.js?v=20261015" defer></script>
+  <script src="app.js?v=20261015" defer></script>
 </head>
 <body class="logged-out">
   <section id="loginScreen" class="login-screen" aria-labelledby="loginTitle">
     <div class="login-composition">
-      <div class="login-brand-panel"><a class="login-logo" href="#weld-live" aria-label="拓普工艺部业务门户"><img src="assets/tuopu-logo.png" alt="TUOPU 拓普" width="170" height="57"></a><div class="login-intro"><p class="login-kicker">PROCESS ENGINEERING</p><h1>工艺部业务门户</h1><p>补焊记录、报警进度与备件管理，<br>集中查看，及时跟进。</p><div class="login-module-list"><div><span class="login-feature-icon weld-feature" aria-hidden="true">焊</span><span><strong>补焊点</strong><small>实时记录 · 日期查询 · 趋势</small></span></div><div><span class="login-feature-icon alarm-feature" aria-hidden="true">灯</span><span><strong>安灯报警</strong><small>线体与部门 · 处理进度</small></span></div><div><span class="login-feature-icon spare-feature" aria-hidden="true">件</span><span><strong>备件管理</strong><small>扫码 · 入库 · 出库 · 盘点</small></span></div></div></div><p class="login-brand-footer">TUOPU <span>工艺管理 · 业务协同</span></p></div>
+      <div class="login-brand-panel"><a class="login-logo" href="#weld-live" aria-label="拓普工艺部业务门户"><img src="assets/tuopu-logo.png" alt="TUOPU 拓普" width="170" height="57"></a><div class="login-intro"><p class="login-kicker">PROCESS ENGINEERING</p><h1>工艺部业务门户</h1><p>业务记录、现场管理与工艺工具，<br>集中查看，协同处理。</p><div class="login-module-list"><div><span class="login-feature-icon weld-feature" aria-hidden="true">焊</span><span><strong>生产记录</strong><small>补焊点 · 安灯报警</small></span></div><div><span class="login-feature-icon alarm-feature" aria-hidden="true">灯</span><span><strong>现场业务</strong><small>视觉检具 · 备件管理</small></span></div><div><span class="login-feature-icon spare-feature" aria-hidden="true">件</span><span><strong>工艺工具</strong><small>焊接参数 · 检测对比</small></span></div></div></div><p class="login-brand-footer">TUOPU <span>工艺管理 · 业务协同</span></p></div>
       <div class="login-form-panel"><form id="loginForm"><div class="dialog-heading"><div><p class="eyebrow">欢迎使用</p><h2 id="loginTitle">工号登录</h2></div></div><p class="dialog-note">登录门户，进入业务工作台。</p><label class="field"><span>工号</span><input id="usernameInput" name="username" type="text" autocomplete="username" placeholder="请输入工艺部工号" required></label><label class="field"><span>密码</span><input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required></label><p id="loginError" class="form-error" role="alert" hidden></p><button id="loginSubmit" class="button primary" type="submit">进入工作台 <span aria-hidden="true">→</span></button><p class="login-security">仅已登记的工艺部成员可登录。</p><div class="login-bottom-note"><span class="read-only-dot" aria-hidden="true"></span>工号登录 · 操作留痕</div></form></div>
     </div>
   </section>
@@ -32,13 +37,16 @@
   <aside id="sidebar" class="sidebar" aria-label="业务模块">
     <p class="nav-caption">业务工作台</p>
     <nav><a class="nav-link active" href="#weld-live" data-route="weld-live"><span class="nav-symbol" aria-hidden="true">焊</span><span>补焊点<small>实时记录 · 日期查询 · 趋势</small></span></a><a class="nav-link" href="#alarm" data-route="alarm"><span class="nav-symbol" aria-hidden="true">灯</span><span>安灯报警<small>线体 · 部门 · 处理进度</small></span></a><a class="nav-link" href="#vision" data-route="vision"><span class="nav-symbol" aria-hidden="true">检</span><span>视觉检具<small>检测结果 · 测点明细</small></span></a><a class="nav-link" href="#spares" data-route="spares"><span class="nav-symbol" aria-hidden="true">件</span><span>备件管理<small>扫码 · 入库 · 出库 · 盘点</small></span></a></nav>
-    <div class="sidebar-note"><strong>工艺业务 · 操作留痕</strong><p>业务数据来自公司系统；库存变化以回写确认为准。</p><span id="accountLabel">尚未登录</span></div>
+    <p class="nav-caption nav-tools-caption">工艺工具</p>
+    <nav aria-label="工艺工具"><a class="nav-link" href="#tools" data-route="tools"><span class="nav-symbol" aria-hidden="true">具</span><span>工具中心<small>焊接参数 · 检测对比</small></span></a></nav>
+    <div class="sidebar-note"><strong>工艺业务 · 操作留痕</strong><p>公司业务数据与本地工具，统一工作入口。</p><span id="accountLabel">尚未登录</span></div>
   </aside>
   <button id="navBackdrop" class="nav-backdrop" aria-label="关闭导航" type="button" hidden></button>
   <main id="mainContent" tabindex="-1">
     <div class="container">
       <div class="page-heading"><div><p class="eyebrow">工艺业务 / <span id="breadcrumb">补焊点</span></p><h1 id="pageTitle">补焊点</h1><p id="pageDescription" class="muted">查看实时缺陷记录，也可按日期、产品和线体查询趋势。</p></div><a id="sourceLink" class="text-link" href="#" target="_blank" rel="noopener noreferrer" hidden>打开原系统 ↗</a></div>
       <div id="moduleNotice" class="notice info">这里显示焊接不合格日志。记录数不等于产品数，也不能据此确认已完成补焊。</div>
+      <section id="toolsWorkbench" aria-label="工艺工具中心" hidden></section>
       <div id="sourceStatusLine" class="source-status-line" role="status"><span class="source-status-dot" aria-hidden="true"></span><span id="sourceStatusText">正在检查数据源状态…</span></div>
       <section class="filter-panel" aria-label="查询条件">
         <form id="queryForm" class="query-form">

@@ -4,7 +4,7 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const n = value => typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('zh-CN') : '—';
   const measureNumber = value => typeof value === 'number' && Number.isFinite(value) ? String(value) : '—';
-  const stamp = value => value ? String(value).replace('T',' ').replace(/\.\d+Z$/,' UTC').replace(/Z$/,' UTC') : '—';
+  const stamp=PortalWorkbench.deviceStamp,sourceStamp=PortalWorkbench.sourceStamp;
   const resultBadge = result => `<span class="vis-result ${result==='OK'?'ok':result==='NG'?'ng':'unknown'}">${esc(result || '待核实')}</span>`;
   const emptyFilters = () => ({start:'',end:'',part:'all',result:'all',search:'',interval:'auto',recentLimit:'all',lineId:'all',deviceId:'all'});
   const state = {status:null,account:null,active:false,epoch:0,report:null,reportQuery:null,trendDate:null,page:1,size:50,request:null,detailRequest:null,importRequest:null,timer:null,error:'',lastRead:null,fleet:null,liveSource:null,catalogRequest:null,saveDeviceRequest:null,catalogError:'',filters:emptyFilters()};
@@ -29,7 +29,7 @@
       <label class="field vis-search"><span>零件 SN / 检具 / 型号</span><input id="visSearch" type="search" placeholder="输入关键词查询" autocomplete="off" maxlength="150"></label>
       <div class="vis-query-actions"><button class="button primary" type="submit">查询</button><button class="button" id="visReset" type="button">重置</button></div>
       <div class="vis-recent-choices"><label for="visRecentLimit">查看数量</label><select id="visRecentLimit"><option value="all">全部记录</option><option value="100">最近 100 条</option><option value="500">最近 500 条</option><option value="1000">最近 1000 条</option><option value="custom">自定义数量</option></select><label id="visRecentCustom" class="vis-recent-custom" hidden><span>最近</span><input id="visRecentCount" disabled type="number" min="1" max="20000" step="1" value="500" aria-label="最近检测记录数量"><span>条</span></label><small id="visSelectionNote">在当前条件下按检测时间取最新记录，重复检测按多条计数。</small></div>
-      <p class="vis-hint">时间留空不限范围；结束时间包含该分钟内的全部检测。时间按检具原始记录显示。</p>
+      <p class="vis-hint">时间留空不限范围；结束时间包含该分钟内的全部检测。检测时间按检具原始时钟显示；采集与门户时间显示为北京时间（UTC+8）。</p>
     </form>
     <p id="visError" class="vis-message error" role="alert" hidden></p>
     <div class="vis-stats" aria-label="当前筛选统计"><article><span>检测记录</span><strong id="visTotal">—</strong><small>按检测次数计数</small></article><article><span>合格 OK</span><strong id="visOK">—</strong><small>原始整体结论</small></article><article class="vis-stat-ng"><span>不合格 NG</span><strong id="visNG">—</strong><small>原始整体结论</small></article><article><span>检测合格率</span><strong id="visRate">—</strong><small>OK / 可统计记录</small></article></div>
@@ -45,6 +45,15 @@
     <section class="vis-panel vis-records" aria-labelledby="visRecordsTitle"><div class="vis-panel-heading"><div><h2 id="visRecordsTitle">检测记录</h2><p id="visScope">尚未读取记录。</p></div><span id="visPolling" class="vis-polling">打开此页时每 30 秒刷新</span></div><div id="visTable" class="vis-empty">等待读取检测记录。</div><div class="vis-pagination"><label class="inline-field"><span>每页</span><select id="visPageSize" aria-label="检测记录每页条数"><option value="20">20 条</option><option value="50" selected>50 条</option><option value="100">100 条</option></select></label><div><button id="visPrev" type="button" class="button" disabled>上一页</button><span id="visPageNumber">—</span><button id="visNext" type="button" class="button" disabled>下一页</button></div></div></section>
     <details id="visImportPanel" class="vis-panel vis-import" hidden><summary>导入检测 CSV <span>管理员</span></summary><p>选择从检具备份目录取得的单个 CSV，加入门户记录。导入文件不会建立现场自动同步。</p><form id="visImportForm"><label class="field"><span>检具标识</span><input id="visDevice" value="vision-01" required maxlength="100" autocomplete="off"><small>同一台检具请保持同一标识，便于识别重复记录。</small></label><label class="field vis-import-file"><span>普通检测 CSV 文件</span><input id="visFile" type="file" accept=".csv,text/csv" required><small>仅 Front11 / Front12，排除 ALLmeasure 全检；单个文件不超过 1 MB。</small></label><button id="visImportButton" type="submit" class="button primary">导入记录</button></form><p id="visImportMessage" class="vis-message" role="status" hidden></p></details>`;
   $('.filter-panel').before(root);
+  const fleetDetails=document.createElement('details');fleetDetails.id='visFleetDetails';fleetDetails.className='vis-fleet-details';fleetDetails.innerHTML='<summary>设备台账与接入管理 <span>查看设备状态、登记检具</span></summary>';
+  const fleetPanel=root.querySelector('.vis-fleet');
+  for(const selector of ['.vis-panel-heading','#visCatalogError','#visFleetCards','.vis-fleet-footnote'])fleetDetails.append(fleetPanel.querySelector(selector));
+  fleetPanel.append(fleetDetails);
+  const sessionKey=account=>'portal:vision:view:v1:'+account;
+  function saveView(){if(!state.account)return;try{sessionStorage.setItem(sessionKey(state.account),JSON.stringify({filters:state.filters,size:state.size,page:state.page}));}catch(_){}}
+  function clearSavedView(account){if(account)try{sessionStorage.removeItem(sessionKey(account));}catch(_){}}
+  function restoreView(){try{const saved=JSON.parse(sessionStorage.getItem(sessionKey(state.account))||'null');if(!saved?.filters)return;const filters=emptyFilters();for(const key of Object.keys(filters))if(typeof saved.filters[key]==='string')filters[key]=saved.filters[key].slice(0,key==='search'?150:100);if(!['all','Tesla_Front11','Tesla_Front12'].includes(filters.part))filters.part='all';if(!['all','OK','NG'].includes(filters.result))filters.result='all';if(!['auto','5m','15m','30m','hour','day'].includes(filters.interval))filters.interval='auto';if(filters.recentLimit!=='all'&&(!/^\d+$/.test(filters.recentLimit)||Number(filters.recentLimit)<1||Number(filters.recentLimit)>20000))filters.recentLimit='all';for(const key of ['start','end'])if(filters[key]&&!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(filters[key]))filters[key]='';if(filters.start&&filters.end&&filters.start>filters.end){filters.start='';filters.end='';}state.filters=filters;if([20,50,100].includes(saved.size))state.size=saved.size;state.page=Number.isInteger(saved.page)&&saved.page>0?saved.page:1;for(const [id,key] of [['#visStart','start'],['#visEnd','end'],['#visPart','part'],['#visResult','result'],['#visSearch','search'],['#visInterval','interval']])$(id).value=filters[key];const custom=!['all','100','500','1000'].includes(filters.recentLimit);$('#visRecentLimit').value=custom?'custom':filters.recentLimit;$('#visRecentCustom').hidden=!custom;$('#visRecentCount').disabled=!custom;if(custom)$('#visRecentCount').value=filters.recentLimit;$('#visPageSize').value=String(state.size);}catch(_){}}
+  function setMarkup(selector,html){const element=$(selector);if(element.innerHTML===html)return;const left=element.scrollLeft,top=element.scrollTop,focused=element.contains(document.activeElement)?document.activeElement:null,key=focused?.dataset.visionDetail;element.innerHTML=html;element.scrollLeft=left;element.scrollTop=top;if(key)element.querySelector('[data-vision-detail="'+CSS.escape(key)+'"]')?.focus({preventScroll:true});}
   const dialog = document.createElement('dialog');
   dialog.id='visDetailDialog';dialog.className='vis-dialog';dialog.setAttribute('aria-labelledby','visDetailTitle');
   dialog.innerHTML='<div class="dialog-heading"><div><p class="eyebrow">视觉检具 · 测点明细</p><h2 id="visDetailTitle">检测详情</h2></div><button id="visCloseDetail" type="button" class="icon-button" aria-label="关闭检测详情">×</button></div><div id="visDetailBody"></div>';
@@ -82,8 +91,8 @@
     const statusFor=device=>{
       if(device.status==='pending')return {text:'待配置',tone:'pending',detail:'已登记资料，尚未接入检测数据'};
       const source=state.liveSource;
-      if(source?.state==='ready')return {text:source.mode==='import'?'手动导入':'文件可读取',tone:'ready',detail:source.mode==='import'?'当前为已导入记录':'采集扫描：'+stamp(source.collectorCheckedAt)};
-      if(source?.state==='waiting')return {text:'等待采集更新',tone:'waiting',detail:'最后扫描：'+stamp(source.collectorCheckedAt)};
+      if(source?.state==='ready')return {text:source.mode==='import'?'手动导入':'文件可读取',tone:'ready',detail:source.mode==='import'?'当前为已导入记录':'采集扫描：'+sourceStamp(source.collectorCheckedAt)};
+      if(source?.state==='waiting')return {text:'等待采集更新',tone:'waiting',detail:'最后扫描：'+sourceStamp(source.collectorCheckedAt)};
       if(source?.state==='error'||source?.state==='missing')return {text:'需要检查',tone:'error',detail:'请查看下方数据来源提示'};
       return {text:'待读取状态',tone:'waiting',detail:'配置已登记，读取状态尚未确认'};
     };
@@ -102,6 +111,8 @@
       if(!isCurrent('catalogRequest',request))return;
       if(!Array.isArray(fleet.lines)||!Array.isArray(fleet.devices))throw new Error('检具台账格式无法读取。');
       state.fleet=fleet;state.catalogError='';
+      const lineExists=state.filters.lineId==='all'||fleet.lines.some(line=>line.id===state.filters.lineId),device=fleet.devices.find(device=>device.id===state.filters.deviceId),deviceExists=state.filters.deviceId==='all'||device&&(state.filters.lineId==='all'||device.lineId===state.filters.lineId);
+      if(!lineExists||!deviceExists){state.filters.lineId='all';state.filters.deviceId='all';state.page=1;saveView();loadReport('scope-restored');}
     } catch(error){if(isCurrent('catalogRequest',request)&&(error.name!=='AbortError'||request.timedOut))state.catalogError='检具台账读取失败，请刷新页面重试。';}
     finally {clearTimeout(request.timeout);if(isCurrent('catalogRequest',request)){state.catalogRequest=null;renderFleet();updateControls();}}
   }
@@ -162,8 +173,8 @@
   }
   function setContext(status,selected) {
     const oldActive=state.active,account=status?.authenticated?status.account:null,accountChanged=account!==state.account;
-    if(!status?.authenticated || accountChanged)resetPrivateState();
-    state.status=status;state.account=account;state.active=Boolean(selected&&status?.authenticated);root.hidden=!state.active;
+    if(!status?.authenticated || accountChanged){clearSavedView(state.account);resetPrivateState();}
+    state.status=status;state.account=account;state.active=Boolean(selected&&status?.authenticated);root.hidden=!state.active;if(account&&accountChanged)restoreView();
     $('#visImportPanel').hidden=status?.role!=='admin'||Boolean(state.report?.scope?.pending);$('#visAddDevice').hidden=status?.role!=='admin';
     if(status?.role!=='admin'){closeDeviceDialog();$('#visImportPanel').open=false;cancel('importRequest');$('#visFile').value='';message('#visImportMessage','');}
     if(!state.active){clearTimer();cancel('request');cancel('catalogRequest');closeDeviceDialog();closeDetail();if(oldActive){state.epoch++;if(state.importRequest)message('#visImportMessage','上次导入的提交结果尚未确认，请刷新检测记录核实。','warning');cancel('importRequest');}}else if(!oldActive||accountChanged){loadCatalog();loadReport('route');}
@@ -171,7 +182,7 @@
   }
   function resetPrivateState() {
     state.epoch++;clearTimer();cancel('request');cancel('detailRequest');cancel('importRequest');state.report=null;state.reportQuery=null;state.trendDate=null;state.error='';state.lastRead=null;state.page=1;state.filters=emptyFilters();state.fleet=null;state.liveSource=null;state.catalogError='';cancel('catalogRequest');closeDeviceDialog();
-    $('#visTrendData').open=false;
+    $('#visTrendData').open=false;$('#visFleetDetails').open=false;state.size=50;$('#visPageSize').value='50';
     $('#visQueryForm').reset();$('#visInterval').value='auto';$('#visRecentCustom').hidden=true;$('#visRecentCount').disabled=true;$('#visImportForm').reset();$('#visImportPanel').open=false;message('#visImportMessage','');closeDetail();renderReport();
   }
   function updateControls() {
@@ -185,12 +196,8 @@
     $('#visAddDevice').disabled=!state.active||!state.fleet;
     updatePeriodChoices();
   }
-  function periodDates(period) {
-    if(period==='all')return {start:'',end:''};
-    const now=new Date(),days={today:1,week:7,month:30}[period];
-    const localDay=date=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-    return {start:localDay(new Date(now.getFullYear(),now.getMonth(),now.getDate()-days+1,12))+'T00:00',end:localDay(now)+'T23:59'};
-  }
+  const periodDates=period=>PortalWorkbench.periodDates(period);
+
   function updatePeriodChoices() {
     for(const button of $('#visPeriodChoices').querySelectorAll('[data-vis-period]')){
       const dates=periodDates(button.dataset.visPeriod);
@@ -205,7 +212,7 @@
     $('#visSource').className='vis-source '+(isStale?'warning':waiting?'waiting':source?.state==='ready'?'ready':'');
     $('#visSourceTitle').textContent=state.error?'检测数据读取异常':source?.state==='error'?'采集数据需要检查':missingFile?'采集文件暂时无法读取':source?.state==='pending'?'该检具尚未接入':waiting?'共享可读取，等待采集更新':source?.state==='ready'?(source.mode==='import'?'已导入检测文件':'检测数据可读取'):source?.state==='missing'?'等待接入检测数据':'等待读取检测数据';
     $('#visSourceMessage').textContent=state.error?(state.report?'当前保留上次成功读取的数据，可能不是最新结果。':'本次未能读取检测记录，请刷新重试。'):source?.message||'登录后读取已接入的检测记录。';
-    const times=[];if(source?.mode==='file')times.push('采集端最后扫描：'+(source.collectorCheckedAt?stamp(source.collectorCheckedAt):'未提供'));if(source?.checkedAt)times.push('门户查询：'+stamp(source.checkedAt));else if(state.lastRead)times.push('门户读取：'+new Date(state.lastRead).toLocaleTimeString('zh-CN',{hour12:false}));if(source?.updatedAt)times.push('门户最近入库：'+stamp(source.updatedAt));$('#visSourceTime').textContent=times.join(' · ');
+    const times=[];if(source?.mode==='file')times.push('采集端最后扫描：'+(source.collectorCheckedAt?sourceStamp(source.collectorCheckedAt):'未提供'));if(source?.checkedAt)times.push('门户查询：'+sourceStamp(source.checkedAt));else if(state.lastRead)times.push('门户读取：'+sourceStamp(new Date(state.lastRead).toISOString()));if(source?.updatedAt)times.push('门户最近入库：'+sourceStamp(source.updatedAt));$('#visSourceTime').textContent=times.join(' · ');$('#visSourceTime').title='来源原始时间：'+[source?.collectorCheckedAt,source?.checkedAt,source?.updatedAt].filter(Boolean).join(' · ');
     root.classList.toggle('vis-stale',isStale);
   }
   function renderReport() {
@@ -216,7 +223,7 @@
     const selection=report?.selection;
     $('#visSelectionNote').textContent=selection?.recentLimit?`符合条件 ${n(selection.matchedRecords)} 条，取最新 ${n(selection.selectedRecords)} 条参与统计。重复检测按多条计数。`:'在当前条件下按检测时间取最新记录，重复检测按多条计数。';
     const records=report?.records||[];$('#visTable').className=records.length?'vis-table-wrap':'vis-empty';
-    $('#visTable').innerHTML=records.length?`<table><thead><tr><th scope="col">零件 SN</th><th scope="col">检测时间</th><th scope="col">型号</th><th scope="col">检具</th><th scope="col">整体结论</th><th scope="col">测点</th><th scope="col">查看</th></tr></thead><tbody>${records.map(record=>`<tr class="${record.identityConflict?'vis-conflict-row':''}"><td class="vis-sn">${esc(record.serialNumber)}${record.identityConflict?'<small class="vis-conflict-label">版本冲突 · 未参与统计</small>':''}</td><td class="vis-nowrap">${esc(stamp(record.measuredAt))}</td><td>${esc(record.partName)}</td><td>${esc(record.deviceId)}</td><td>${resultBadge(record.sourceResult)}</td><td>${n(record.itemCount)}</td><td><button class="vis-detail-button" type="button" data-vision-detail="${esc(record.id)}" aria-label="查看 ${esc(record.serialNumber)} 的测点详情">测点详情 <span aria-hidden="true">→</span></button></td></tr>`).join('')}</tbody></table>`:report?(report.source?.state==='missing'?'尚未接入检测数据。管理员可以先导入一份普通检测 CSV。':'当前条件下没有检测记录。'):'等待读取检测记录。';
+    setMarkup('#visTable',records.length?`<table><thead><tr><th scope="col">零件 SN</th><th scope="col">检测时间（设备原始）</th><th scope="col">型号</th><th scope="col">检具</th><th scope="col">整体结论</th><th scope="col">测点</th><th scope="col">查看</th></tr></thead><tbody>${records.map(record=>`<tr class="${record.identityConflict?'vis-conflict-row':''}"><td class="vis-sn">${esc(record.serialNumber)}${record.identityConflict?'<small class="vis-conflict-label">版本冲突 · 未参与统计</small>':''}</td><td class="vis-nowrap">${esc(stamp(record.measuredAt))}</td><td>${esc(record.partName)}</td><td>${esc(record.deviceId)}</td><td>${resultBadge(record.sourceResult)}</td><td>${n(record.itemCount)}</td><td><button class="vis-detail-button" type="button" data-vision-detail="${esc(record.id)}" aria-label="查看 ${esc(record.serialNumber)} 的测点详情">测点详情 <span aria-hidden="true">→</span></button></td></tr>`).join('')}</tbody></table>`:report?(report.source?.state==='missing'?'尚未接入检测数据。管理员可以先导入一份普通检测 CSV。':'当前条件下没有检测记录。'):'等待读取检测记录。');
     if(records.length){$('#visTable').tabIndex=0;$('#visTable').setAttribute('aria-label','检测记录，可横向滚动');}else{$('#visTable').removeAttribute('tabindex');$('#visTable').removeAttribute('aria-label');}
     const pages=report?Math.max(1,Math.ceil(report.total/report.pageSize)):0;$('#visPageNumber').textContent=report?`${report.page} / ${pages} 页 · ${n(report.total)} 条`:'—';
     message('#visError',state.error);renderSource();renderTrend();renderFleet();updateControls();
@@ -316,7 +323,7 @@
       const report=await api('/local/vision/report?'+new URLSearchParams(query),{signal:request.controller.signal});
       if(!isCurrent('request',request))return;
       if(!report||!Array.isArray(report.records)||!report.summary||!report.source)throw new Error('检测数据格式不符合约定，已保留上次成功结果。');
-      state.report=report;if(report.source.state!=='pending')state.liveSource=report.source;state.reportQuery=query;state.page=Number(report.page)||1;state.lastRead=Date.now();state.error='';
+      state.report=report;if(report.source.state!=='pending')state.liveSource=report.source;state.reportQuery=query;state.page=Number(report.page)||1;state.lastRead=Date.now();state.error='';saveView();
     } catch(error) {
       if(!isCurrent('request',request))return;if(error.name==='AbortError'&&!request.timedOut)return;
       state.error=request.timedOut?'读取检测数据超时，请稍后重试。':String(error.message||'检测数据读取失败。').slice(0,350);
@@ -330,7 +337,7 @@
     if(start&&end&&start>end){message('#visError','开始时间不能晚于结束时间。');return;}
     const choice=$('#visRecentLimit').value,recentLimit=choice==='custom'?$('#visRecentCount').value:choice;
     if(recentLimit!=='all'&&(!/^\d+$/.test(recentLimit)||Number(recentLimit)<1||Number(recentLimit)>20000)){message('#visError','最近检测数量请输入 1 至 20000 的整数。');return;}
-    state.filters={start,end,part:$('#visPart').value,result:$('#visResult').value,search:$('#visSearch').value.trim(),interval:$('#visInterval').value,recentLimit,lineId:state.filters.lineId,deviceId:state.filters.deviceId};state.page=1;closeDetail();loadReport('filter');
+    state.filters={start,end,part:$('#visPart').value,result:$('#visResult').value,search:$('#visSearch').value.trim(),interval:$('#visInterval').value,recentLimit,lineId:state.filters.lineId,deviceId:state.filters.deviceId};state.page=1;saveView();closeDetail();loadReport('filter');
   }
   async function openDetail(id) {
     if(!state.active||!state.status?.authenticated)return;const request=requestFor('detailRequest');$('#visDetailBody').innerHTML='<p class="vis-empty">正在读取测点明细…</p>';if(!dialog.open)dialog.showModal();
@@ -370,7 +377,7 @@
   deviceDialog.addEventListener('cancel',event=>{event.preventDefault();closeDeviceDialog();});
   $('#visQueryForm').addEventListener('submit',event=>{event.preventDefault();applyFilters();});
   $('#visPeriodChoices').addEventListener('click',event=>{const button=event.target.closest('[data-vis-period]');if(!button||button.disabled)return;const dates=periodDates(button.dataset.visPeriod);$('#visStart').value=dates.start;$('#visEnd').value=dates.end;applyFilters();});
-  $('#visReset').addEventListener('click',()=>{$('#visQueryForm').reset();$('#visInterval').value='auto';$('#visRecentCustom').hidden=true;$('#visRecentCount').disabled=true;applyFilters();});$('#visRefresh').addEventListener('click',()=>loadReport());
+  $('#visReset').addEventListener('click',()=>{state.filters.lineId='all';state.filters.deviceId='all';renderFleet();$('#visQueryForm').reset();$('#visInterval').value='auto';$('#visRecentCustom').hidden=true;$('#visRecentCount').disabled=true;applyFilters();});$('#visRefresh').addEventListener('click',()=>loadReport());
   $('#visInterval').addEventListener('change',applyFilters);
   $('#visRecentLimit').addEventListener('change',()=>{const custom=$('#visRecentLimit').value==='custom';$('#visRecentCustom').hidden=!custom;$('#visRecentCount').disabled=!custom;if(custom)$('#visRecentCount').focus();else applyFilters();});
   $('#visRecentCount').addEventListener('change',applyFilters);

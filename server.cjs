@@ -10,6 +10,7 @@ const {createInventoryService}=require('./lib/inventory.cjs');
 const {createVisionService}=require('./lib/vision.cjs');
 const {createCredentialStore}=require('./lib/credential-store.cjs');
 const {createAutoSource}=require('./lib/auto-source.cjs');
+const {createToolsService}=require('./lib/tools.cjs');
 const ROOT=__dirname, PUBLIC=path.join(ROOT,'public');
 const SESSION_MS=8*60*60*1000;
 function loadConfig(){try{return JSON.parse(fs.readFileSync(path.join(ROOT,'config.local.json'),'utf8').replace(/^\uFEFF/,''));}catch(_){return {};}}
@@ -23,6 +24,7 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
   function authorizeActor(actor,{review=false}={}){const current=members.get(actor.account);if(!current?.active||current.version!==actor.version)throw new PortalError('成员权限或登录状态已改变，请重新登录。',401);if(review&&!['admin','reviewer'].includes(current.role))throw new PortalError('只有指定复核人员可以复核盘点。',403);return current;}
   const inventory=inventoryService||createInventoryService({root,source:dataService,now,authorizeActor});
   const vision=visionService||createVisionService({root,config,now});
+  const toolService=createToolsService();
   async function stockCapabilities(){try{return await inventory.capabilities();}catch(_){return Object.fromEntries(['inbound','outbound','adjust'].map(key=>[key,{enabled:false,reason:'本机库存记录无法读取，请管理员核对存储文件。'}]));}}
   const tls=config.tls?.certFile&&config.tls?.keyFile?{cert:fs.readFileSync(path.resolve(root,config.tls.certFile)),key:fs.readFileSync(path.resolve(root,config.tls.keyFile))}:null;
   const configuredOrigins=new Set();
@@ -47,7 +49,7 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
       if(req.method==='GET'&&url.pathname==='/local/status'){
         const sourceStatus=dataService.status();
         const inventoryCapabilities=await stockCapabilities();
-        return json(res,200,{authenticated:Boolean(session),connected:sourceStatus.state==='ready',account:session?.account||null,name:session?.name||null,role:session?.role||null,sourceStatus,configured:Boolean(connector),modules:{weld:Boolean(connector),alarm:Boolean(connector),spares:Boolean(connector),vision:true},writeEnabled:Object.values(inventoryCapabilities).some(value=>value.enabled),inventoryCapabilities,sourceUrls:session?links():{},environmentLabel:config.environmentLabel||'',note:configurationError});
+        return json(res,200,{authenticated:Boolean(session),connected:sourceStatus.state==='ready',account:session?.account||null,name:session?.name||null,role:session?.role||null,sourceStatus,configured:Boolean(connector),modules:{weld:Boolean(connector),alarm:Boolean(connector),spares:Boolean(connector),vision:true,tools:true},writeEnabled:Object.values(inventoryCapabilities).some(value=>value.enabled),inventoryCapabilities,sourceUrls:session?links():{},environmentLabel:config.environmentLabel||'',note:configurationError});
       }
       if(req.method==='POST'&&url.pathname==='/local/login'){
         if(!String(req.headers['content-type']||'').startsWith('application/json'))throw new PortalError('登录请求需要JSON格式。',415);
@@ -67,6 +69,13 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
       if(url.pathname.startsWith('/local/')){
         if(!session)throw new PortalError('请先登录工艺部门户。',401);
         if(req.method==='POST'&&!String(req.headers['content-type']||'').startsWith('application/json'))throw new PortalError('请求需要JSON格式。',415);
+        if(req.method==='GET'&&url.pathname==='/local/tools')return json(res,200,toolService.manifest());
+        const toolRoute=/^\/local\/tools\/v1\/([a-z-]+)\/(contract|run)$/.exec(url.pathname);
+        if(toolRoute){
+          if(req.method==='GET'&&toolRoute[2]==='contract')return json(res,200,toolService.contract(toolRoute[1]));
+          if(req.method==='POST'&&toolRoute[2]==='run')return json(res,200,await toolService.runRemote(toolRoute[1]));
+          throw new PortalError('此工具接口不支持该请求方式。',405);
+        }
         if(req.method==='GET'&&url.pathname==='/local/vision/catalog'){
           const result=await vision.catalog();
           if(!getSession(req))throw new PortalError('会话已退出，请重新登录。',401);

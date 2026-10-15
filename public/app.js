@@ -2,18 +2,24 @@
   'use strict';
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
+  const QueryState = window.PortalState;
+  const querySession = QueryState.createSession({getItem:key=>sessionStorage.getItem(key),setItem:(key,value)=>sessionStorage.setItem(key,value),removeItem:key=>sessionStorage.removeItem(key)});
   const escape = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const MODULES = {
     weld: {title:'补焊点',description:'默认查看当天实时缺陷记录，也可按日期、产品和线体查询趋势。',notice:'统计源自焊接不合格日志。日志条数不等于产品数，也不能据此确认已完成补焊。'},
     alarm: {title:'安灯报警',description:'按所选时间、线体和部门查看报警处理进度。',notice:'范围内的报警记录，不代表全部设备即时状态。'},
     vision: {title:'视觉检具',description:'按线体和检具查看检测结果、合格率趋势与测点明细。',notice:'仅纳入普通检测，排除 ALLmeasure 全检。统计按检测次数计算，同一 SN 复测分别保留。'},
-    spares: {title:'备件管理',description:'入库、出库与盘点，在手机和电脑上完成；成员操作按登录工号留痕。',notice:'库存变化以公司系统回写确认为准。'}
+    spares: {title:'备件管理',description:'入库、出库与盘点，在手机和电脑上完成；成员操作按登录工号留痕。',notice:'库存变化以公司系统回写确认为准。'},
+    tools: {title:'工艺工具',description:'焊接参数导出、检具与三坐标对比，在统一工作台中完成。',notice:'选择工具并导入本地文件，查看校验结果后再导出。'}
   };
   const state = {status:null,authenticated:false,connected:false,module:'weld',view:'live',sparesView:'cards',defects:[],defectDraft:[],defectOptions:[],weldDefectType:'all',weldOp:'all',weldLocation:'all',page:1,size:50,result:null,error:'',loading:false,request:null,polling:true,interval:30,timer:null,statusTimer:null,cache:new Map(),statusLoading:false,statusRequest:null,authEpoch:0};
   let toastTimer;
   const importState={result:null,controller:null,revision:0};
   const weldDetail={snapshot:null,line:'all',actions:[]};
   const weldRanking={parent:null,mode:'observed',items:[]};
+  const queries={account:null,modules:{}};
+  const rendered={module:null,data:null};
+  const reportContent=new WeakMap();
   function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
   function shiftDate(day,amount){const date=new Date(day+'T12:00:00Z');date.setUTCDate(date.getUTCDate()+amount);return date.toISOString().slice(0,10);}
   function dateTime(value){if(!value||/^(?:0000|0001)[-/]/.test(String(value)))return '—';const date=new Date(value);if(Number.isNaN(date.getTime()))return String(value);if(date.getFullYear()<=1)return '—';return new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(date);}
@@ -32,11 +38,11 @@
   function closeNav(){$('body').classList.remove('nav-open');$('#menuButton').setAttribute('aria-expanded','false');$('#navBackdrop').hidden=true;}
   function clearTimer(){if(state.timer){clearTimeout(state.timer);state.timer=null;}}
   function cancelRequest(){const request=state.request;if(request){state.request=null;request.controller.abort();clearTimeout(request.timeout);}state.loading=false;}
-  function allowPolling(){return true;}
+  function allowPolling(){return ['weld','alarm'].includes(state.module);}
   function sourceState(){return state.status?.sourceStatus||{state:state.connected?'ready':'unconfigured',configured:state.connected};}
   function canRead(){return state.authenticated&&(state.connected||sourceState().configured===true);}
-  function stopPolling(){state.polling=false;clearTimer();renderPolling();}
-  function schedulePolling(){clearTimer();if(state.polling&&state.connected&&!document.hidden&&!state.request)state.timer=setTimeout(()=>loadData('poll'),state.interval*1000);}
+  function stopPolling(){state.polling=false;clearTimer();saveQuerySettings();renderPolling();}
+  function schedulePolling(){clearTimer();if(allowPolling()&&state.polling&&state.connected&&!document.hidden&&!state.request)state.timer=setTimeout(()=>loadData('poll'),state.interval*1000);}
   function renderPolling(){
     const allowed=allowPolling();$('#intervalField').hidden=!allowed;$('#pollButton').hidden=!allowed;
     $('#pollButton').disabled=!canRead();$('#pollButton').textContent=state.polling?'暂停自动刷新':'启动自动刷新';$('#pollButton').setAttribute('aria-pressed',String(state.polling));$('#pollButton').classList.toggle('active',state.polling);
@@ -50,6 +56,7 @@
   function renderConnection(){
     window.InventoryWorkbench?.setContext(state.authenticated?state.status:null,state.module==='spares');
     window.VisionWorkbench?.setContext(state.authenticated?state.status:null,state.module==='vision');
+    window.PortalTools?.setContext(state.authenticated?state.status:null,state.module==='tools');
     $('#appShell').hidden=!state.authenticated;$('#loginScreen').hidden=state.authenticated;document.body.classList.toggle('logged-out',!state.authenticated);
     if(!state.authenticated){closeAlarmDetail();closeWeldDefectDetail();}
     const sourceInfo=sourceState(),labels={unconfigured:'待配置数据源',connecting:'数据源连接中',ready:'数据源已就绪',error:'数据源暂不可用'};
@@ -62,6 +69,7 @@
     $('#previewImport').disabled=!state.authenticated||!validImportFile($('#importFile').files[0])||Boolean(importState.controller);
     const source=safeSourceUrl();$('#sourceLink').hidden=!source;if(source)$('#sourceLink').href=source;
     if(state.module==='vision'){$('#connectionBadge').textContent='视觉检具数据';$('#connectionBadge').classList.remove('connected','error');$('#loginButton').hidden=true;$('#sourceLink').hidden=true;}
+    if(state.module==='tools'){$('#connectionBadge').textContent='本地工艺工具';$('#connectionBadge').classList.remove('connected','error');$('#loginButton').hidden=true;$('#sourceLink').hidden=true;}
     renderPolling();
   }
   function invalidateStatusRequest(){state.authEpoch++;clearTimeout(state.statusTimer);state.statusTimer=null;const request=state.statusRequest;state.statusRequest=null;state.statusLoading=false;if(request)request.controller.abort();}
@@ -72,42 +80,88 @@
       try{
         const wasReady=state.connected,status=await api('/local/status',{signal:request.controller.signal});if(state.statusRequest!==request||request.epoch!==state.authEpoch)return;
         state.status=status;state.authenticated=Boolean(status.authenticated);state.connected=state.authenticated&&Boolean(status.connected);$('#connectionBadge').classList.remove('error');
+        syncQueryAccount(state.authenticated?status.account:null);
         if(!state.authenticated){clearTimer();cancelRequest();if($('#connectionDialog').open)$('#connectionDialog').close();}
         if(!state.connected)clearTimer();
-        if(state.connected&&(read||!wasReady&&(state.polling||!state.result))&&!state.request)await loadData('initial');else renderResult();
+        if(allowPolling()&&state.connected&&(read||!wasReady&&(state.polling||!state.result))&&!state.request)await loadData('initial');else renderResult({content:false});
       }catch(error){
         if(state.statusRequest!==request||request.epoch!==state.authEpoch||error.name==='AbortError')return;
-        state.connected=false;if(error.status===401)state.authenticated=false;clearTimer();state.error='数据源状态读取失败：'+errorText(error);
+        state.connected=false;if(error.status===401){state.authenticated=false;syncQueryAccount(null);}clearTimer();state.error='数据源状态读取失败：'+errorText(error);
         if(state.status)state.status.sourceStatus={...sourceState(),state:'error',error:state.error,retryAt:null};
-        $('#connectionBadge').classList.add('error');$('#loginError').textContent=state.error;$('#loginError').hidden=false;renderResult();
+        $('#connectionBadge').classList.add('error');$('#loginError').textContent=state.error;$('#loginError').hidden=false;renderResult({content:false});
       }finally{if(state.statusRequest===request&&request.epoch===state.authEpoch){state.statusRequest=null;state.statusLoading=false;renderConnection();scheduleStatus();}}
     })();
     return request.promise;
   }
   function scheduleStatus(){clearTimeout(state.statusTimer);state.statusTimer=null;if(state.authenticated&&!document.hidden)state.statusTimer=setTimeout(()=>checkStatus(),state.connected?30000:10000);}
   function querySnapshot(){
-    const live=state.module==='weld'&&state.view==='live';const rolling=live||$('#rangeMode').value==='today';
+    const rolling=$('#rangeMode').value==='today';
     const start=rolling?today():$('#startDate').value,end=rolling?today():$('#endDate').value;
-    if(rolling){$('#startDate').value=start;$('#endDate').value=end;}
     const keyword=$('#keywordInput').value.trim();const category=state.module==='spares'?$('#categoryFilter').value:'all';
-    return {module:state.module,view:state.view,page:state.page,size:state.size,start,end,keyword,category,stock:$('#stockFilter').value||'all',rolling,materialName:$('#materialFilter').value||'all',line:state.module==='alarm'?$('#alarmLineFilter').value:$('#weldLineFilter').value,defects:[...state.defects],defectType:state.weldDefectType,op:state.weldOp,location:state.weldLocation,status:$('#alarmStatusFilter').value,group:'all',department:$('#alarmDepartmentFilter').value};
+    return {module:state.module,view:rolling?'live':'weekly',page:state.page,size:state.size,start,end,keyword,category,stock:$('#stockFilter').value||'all',rolling,materialName:$('#materialFilter').value||'all',line:state.module==='alarm'?$('#alarmLineFilter').value:$('#weldLineFilter').value,defects:[...state.defects],defectType:state.weldDefectType,op:state.weldOp,location:state.weldLocation,status:$('#alarmStatusFilter').value,group:'all',department:$('#alarmDepartmentFilter').value};
+  }
+  function currentQueryEntry(){return queries.modules[state.module];}
+  function persistQueries(){querySession.write(queries.account,queries.modules,today());}
+  function saveQuerySettings(){const entry=currentQueryEntry();if(!entry)return;entry.polling=state.polling;entry.interval=state.interval;persistQueries();}
+  function applyQuery(query){
+    const value=QueryState.normalizeQuery(query,state.module,today());state.view=value.view;state.page=value.page;state.size=value.size;state.defects=[...value.defects];state.defectDraft=[...value.defects];state.weldDefectType=value.defectType;state.weldOp=value.op;state.weldLocation=value.location;
+    $('#rangeMode').value=value.rolling?'today':'custom';$('#startDate').value=value.start;$('#endDate').value=value.end;$('#keywordInput').value=value.keyword;$('#pageSize').value=String(value.size);
+    for(const [id,selected] of [['#materialFilter',value.materialName],['#weldLineFilter',state.module==='weld'?value.line:'all'],['#alarmLineFilter',state.module==='alarm'?value.line:'all'],['#categoryFilter',value.category],['#stockFilter',value.stock],['#alarmStatusFilter',value.status],['#alarmDepartmentFilter',value.department]]){const select=$(id);if(![...select.options].some(option=>option.value===selected))select.add(new Option(selected,selected));select.value=selected;select.title=select.selectedOptions[0]?.textContent||'';}
+    $('#defectPicker').open=false;renderDefectPicker();renderWeldDrill();renderDraftHint();
+  }
+  function restoreModuleQuery(){
+    const entry=currentQueryEntry();state.polling=allowPolling()&&(entry?.polling!==false);state.interval=entry?.interval||30;$('#pollInterval').value=String(state.interval);
+    applyQuery(entry?.query||QueryState.normalizeQuery({},state.module,today()));
+  }
+  function syncQueryAccount(account){
+    account=account?String(account):null;if(account===queries.account)return;
+    cancelRequest();clearTimer();
+    if(queries.account)querySession.clear(queries.account);
+    queries.account=account;queries.modules=account?querySession.read(account,today()):{};state.cache.clear();state.result=null;state.defectOptions=[];weldRanking.parent=null;weldRanking.items=[];weldRanking.mode='observed';rendered.module=null;rendered.data=null;closeWeldDefectDetail();closeAlarmDetail();
+    for(const id of ['#materialFilter','#weldLineFilter','#alarmStatusFilter','#alarmLineFilter','#alarmDepartmentFilter'])fillOptions(id,[],'all');
+    restoreModuleQuery();renderResult();
+  }
+  function renderDraftHint(){
+    let hint=$('#queryDraftHint');if(!hint){hint=document.createElement('div');hint.id='queryDraftHint';hint.className='query-draft-hint';hint.setAttribute('role','status');hint.innerHTML='<span>筛选已修改，点击“查询数据”后生效。自动刷新仍使用已查询的条件。</span><button type="button" class="button" id="discardQueryDraft">撤销修改</button>';$('#queryError').before(hint);hint.querySelector('button').addEventListener('click',()=>{applyQuery(currentQueryEntry()?.query||QueryState.normalizeQuery({},state.module,today()));notify('已恢复当前查询条件。');});}
+    hint.hidden=!allowPolling()||QueryState.sameFilters(querySnapshot(),currentQueryEntry()?.query||QueryState.normalizeQuery({},state.module,today()),today());
+    let back=$('#queryBackButton');if(!back){back=document.createElement('button');back.id='queryBackButton';back.type='button';back.className='button query-back-button';back.textContent='← 返回上级查询';hint.after(back);back.addEventListener('click',previousQuery);}back.hidden=state.module!=='alarm'||!currentQueryEntry()?.history?.length;
+  }
+  function commitQuery(query){
+    const old=currentQueryEntry();queries.modules[state.module]={query:QueryState.normalizeQuery(query,state.module,today()),polling:state.polling,interval:state.interval,history:old?.history||[]};persistQueries();renderDraftHint();
+  }
+  function nodePath(root,node){const path=[];while(node&&node!==root){const parent=node.parentElement;if(!parent)return null;path.unshift([...parent.children].indexOf(node));node=parent;}return node===root?path:null;}
+  function atPath(root,path){return path?.reduce((node,index)=>node?.children[index],root);}
+  // A status tick should never replace records. When real content changes,
+  // retain the reader's open sections, horizontal position, and focused cell.
+  function replaceContent(host,html){
+    if(reportContent.get(host)===html)return;
+    const active=host.contains(document.activeElement)?document.activeElement:null,focus=active?{id:active.id,path:nodePath(host,active),start:active.selectionStart,end:active.selectionEnd}:null;
+    const scrollers=[host,...host.querySelectorAll('.table-wrap,.timeline-chart,[data-preserve-scroll]')].map(node=>({path:nodePath(host,node),left:node.scrollLeft,top:node.scrollTop}));
+    const details=[...host.querySelectorAll('details')].map(node=>({key:node.dataset.disclosure||node.id,path:nodePath(host,node),open:node.open}));
+    host.innerHTML=html;reportContent.set(host,html);
+    for(const item of details){const node=item.key?[...host.querySelectorAll('details')].find(node=>(node.dataset.disclosure||node.id)===item.key):atPath(host,item.path);if(node?.tagName==='DETAILS')node.open=item.open;}
+    for(const item of scrollers){const node=atPath(host,item.path);if(node){node.scrollLeft=item.left;node.scrollTop=item.top;}}
+    if(focus){const node=focus.id?document.getElementById(focus.id):atPath(host,focus.path);if(node&&host.contains(node)){node.focus({preventScroll:true});if(typeof focus.start==='number'&&node.setSelectionRange)try{node.setSelectionRange(focus.start,focus.end);}catch(_){}}}
   }
   function scopeText(query){if(!query)return '';const filters=[];if(query.keyword)filters.push('关键词：'+query.keyword);if(query.module==='spares'&&query.category!=='all')filters.push(query.category==='pin'?'定位销':'伸缩气缸');if(query.module==='spares'&&query.stock!=='all')filters.push('库存：'+({out:'缺货',low:'低库存',normal:'库存充足',unknown:'待核实'}[query.stock]||query.stock));if(query.module==='weld'){if(query.materialName&&query.materialName!=='all')filters.push('物料：'+query.materialName);filters.push(query.line&&query.line!=='all'?'线体：'+query.line:'全部线体');filters.push(query.defects?.length?'缺陷：'+query.defects.join('、'):'全部缺陷');if(query.defectType&&query.defectType!=='all')filters.push('不良分类：'+query.defectType);if(query.op&&query.op!=='all')filters.push('工位：'+weldOpLabel(query.op));if(query.location&&query.location!=='all')filters.push('位置：'+query.location);}if(query.module==='alarm'){if(query.status!=='all')filters.push('状态：'+({unresponded:'未响应',processing:'处理中',awaiting_restore:'待复线',completed:'已完成',unknown:'未知'}[query.status]||query.status));if(query.line!=='all')filters.push('产线 / 区域：'+query.line);if(query.department&&query.department!=='all')filters.push('部门：'+query.department);}return (query.module==='spares'?'库存快照':query.start+' 至 '+query.end)+(filters.length?' · '+filters.join(' · '):'');}
   function validateQuery(query){if(!/^\d{4}-\d{2}-\d{2}$/.test(query.start)||!/^\d{4}-\d{2}-\d{2}$/.test(query.end))return '请填写有效的开始和结束日期。';if(query.start>query.end)return '开始日期不能晚于结束日期。';return '';}
   async function loadData(reason='manual'){
-    if(state.module==='spares'||state.module==='vision')return;
+    if(!allowPolling())return;
     if(!canRead()||state.request||(document.hidden&&reason==='poll'))return;
-    const query=querySnapshot(),invalid=validateQuery(query);$('#queryError').hidden=!invalid;$('#queryError').textContent=invalid;if(invalid){stopPolling();return;}
-    clearTimer();const controller=new AbortController();const request={controller,key:cacheKey(),query,reason,timedOut:false};request.timeout=setTimeout(()=>{request.timedOut=true;controller.abort();},60000);state.request=request;state.loading=true;state.error='';renderConnection();renderResult();
+    const draft=querySnapshot(),applied=currentQueryEntry()?.query,submitting=['filter','drill','view'].includes(reason);
+    const query=QueryState.requestQuery({reason,draft,applied,module:state.module,day:today(),page:state.page,size:state.size});
+    const invalid=validateQuery(submitting?draft:query);$('#queryError').hidden=!invalid;$('#queryError').textContent=invalid;if(invalid){renderConnection();renderResult({content:false});schedulePolling();return;}
+    commitQuery(query);if(query.rolling&&$('#rangeMode').value==='today')$('#startDate').value=$('#endDate').value=today();
+    clearTimer();const controller=new AbortController();const request={controller,key:cacheKey(),query,reason,timedOut:false};request.timeout=setTimeout(()=>{request.timedOut=true;controller.abort();},60000);state.request=request;state.loading=true;state.error='';renderConnection();renderResult({content:false});
     const params=new URLSearchParams({page:String(query.page),size:String(query.size),keyword:query.keyword,category:query.category});if(query.module!=='spares'){params.set('start',query.start);params.set('end',query.end);}else params.set('stock',query.stock);if(query.module==='weld'){params.set('view',query.view);params.set('materialName',query.materialName||'all');params.set('line',query.line||'all');query.defects.forEach(defect=>params.append('defect',defect));params.set('defectType',query.defectType||'all');params.set('op',query.op||'all');params.set('location',query.location||'all');}if(query.module==='alarm'){params.set('status',query.status||'all');params.set('line',query.line||'all');params.set('group',query.group||'all');params.set('department',query.department||'all');}
     try{
       const data=await api(`/local/data/${query.module}?${params}`,{signal:controller.signal});
       if(state.request!==request)return;if(!data||!Array.isArray(data.rows))throw new Error('接口记录格式不符合约定，未覆盖上次成功数据。');
-      state.result={data,query,successAt:data.fetchedAt||new Date().toISOString()};state.cache.set(request.key,state.result);state.error='';state.connected=true;if(state.status?.sourceStatus)state.status.sourceStatus={...state.status.sourceStatus,state:'ready',configured:true,error:null};updateFilterOptions(data,query);
+      if(Number.isSafeInteger(Number(data.page))&&Number(data.page)>0)query.page=Number(data.page);state.page=query.page;commitQuery(query);state.result={data,query,successAt:data.fetchedAt||new Date().toISOString()};state.cache.set(request.key,state.result);state.error='';state.connected=true;if(state.status?.sourceStatus)state.status.sourceStatus={...state.status.sourceStatus,state:'ready',configured:true,error:null};updateFilterOptions(data,query);
     }catch(error){
       if(state.request!==request)return;if(error.name==='AbortError'&&!request.timedOut)return;
       state.error=request.timedOut?'读取超时，请稍后重试。':errorText(error);
-      if(error.status===401){invalidateStatusRequest();state.authenticated=false;state.connected=false;stopPolling();state.error='门户登录已过期，请重新使用工号登录。';$('#passwordInput').value='';$('#loginError').textContent=state.error;$('#loginError').hidden=false;}
+      if(error.status===401){invalidateStatusRequest();state.authenticated=false;state.connected=false;syncQueryAccount(null);stopPolling();state.error='门户登录已过期，请重新使用工号登录。';$('#passwordInput').value='';$('#loginError').textContent=state.error;$('#loginError').hidden=false;renderConnection();renderResult();}
       else if(error.status===428){state.connected=false;clearTimer();if(error.sourceStatus&&state.status)state.status.sourceStatus=error.sourceStatus;state.error=errorText(error)+' 门户登录仍然有效。';scheduleStatus();}
       else if(error.status===403){stopPolling();state.error='当前账号没有读取此模块的权限，自动刷新已停止。请向系统管理员核对权限。';}
     }finally{
@@ -153,17 +207,18 @@
   }
   function opDonuts(groups){
     const rows=list(groups);if(!rows.length)return emptyChart('当前范围尚无 OP 工位汇总');
-    return '<div class="op-donut-grid">'+rows.map(group=>{let cursor=0;const items=list(group.items),color=(item,index)=>item.op==='其他'?COLORS[5]:COLORS[index%5],segments=items.map((item,index)=>{const start=cursor;cursor+=(Number(item.count)||0)/Math.max(1,Number(group.recordCount)||0)*100;return color(item,index)+' '+start+'% '+cursor+'%';});return '<article class="op-donut-card"><h3><i style="background:'+lineColor(group.line)+'"></i><span class="op-line-name">'+escape(group.line)+'</span><span class="op-line-caption">OP 工位占比</span></h3><div class="op-donut-body"><div class="op-ring" style="--ring-fill:'+(group.recordCount>0?'conic-gradient('+segments.join(',')+')':'#edf1f6')+'"><div><strong>'+numberText(group.recordCount)+'</strong><span>日志条数</span></div></div><div class="op-donut-legend">'+items.map((item,index)=>'<div><span><i style="background:'+color(item,index)+'"></i>'+escape(item.op)+'</span><strong>'+percent(item.share)+'</strong><small>'+numberText(item.count)+' 条</small></div>').join('')+'</div></div></article>';}).join('')+'</div>';
+    return '<div class="op-donut-grid">'+rows.map(group=>{let cursor=0;const items=list(group.items),color=item=>QueryState.opColor(item.op),segments=items.map(item=>{const start=cursor;cursor+=(Number(item.count)||0)/Math.max(1,Number(group.recordCount)||0)*100;return color(item)+' '+start+'% '+cursor+'%';});return '<details class="op-donut-card" data-disclosure="op-'+escape(group.line)+'"><summary><i style="background:'+lineColor(group.line)+'"></i><span class="op-line-name">'+escape(group.line)+'</span><span class="op-line-caption">'+numberText(group.recordCount)+' 条 · 展开 OP 占比</span></summary><div class="op-donut-body"><div class="op-ring" style="--ring-fill:'+(group.recordCount>0?'conic-gradient('+segments.join(',')+')':'#edf1f6')+'"><div><strong>'+numberText(group.recordCount)+'</strong><span>日志条数</span></div></div><div class="op-donut-legend">'+items.map(item=>'<div><span><i style="background:'+color(item)+'"></i>'+escape(item.op)+'</span><strong>'+percent(item.share)+'</strong><small>'+numberText(item.count)+' 条</small></div>').join('')+'</div></div></details>';}).join('')+'</div>';
   }
   function fillOptions(id,options,current,{multiple=false,allLabel='全部'}={}){
     const select=$(id),values=multiple?list(current):[current||'all'],items=list(options).filter(item=>item&&item.value!==undefined),seen=new Set();
     let normalized=items.filter(item=>{const value=String(item.value);if(seen.has(value)||multiple&&value==='all')return false;seen.add(value);return true;});
     if(!multiple&&!seen.has('all'))normalized=[{value:'all',label:allLabel},...normalized];
     values.filter(value=>value&&value!=='all'&&!seen.has(String(value))).forEach(value=>normalized.push({value,label:value}));
-    select.innerHTML=normalized.map(item=>'<option value="'+escape(item.value)+'"'+(values.includes(String(item.value))?' selected':'')+'>'+escape(item.label||item.value)+(item.value!=='all'&&Number.isFinite(item.count)?' ('+item.count+')':'')+'</option>').join('');
+    replaceContent(select,normalized.map(item=>'<option value="'+escape(item.value)+'"'+(values.includes(String(item.value))?' selected':'')+'>'+escape(item.label||item.value)+(item.value!=='all'&&Number.isFinite(item.count)?' ('+item.count+')':'')+'</option>').join(''));
     if(!multiple){select.value=current||'all';select.title=select.selectedOptions[0]?.textContent||'';}
   }
   function updateFilterOptions(data,query){
+    query=query.module===state.module?querySnapshot():query;
     if(query.module==='weld'){
       const options=data.report?.options||{};fillOptions('#materialFilter',options.materialNames,query.materialName,{allLabel:'全部物料'});fillOptions('#weldLineFilter',options.lines,query.line,{allLabel:'全部线体'});state.defectOptions=list(options.defects);renderDefectPicker();
     }else if(query.module==='alarm'){
@@ -180,17 +235,20 @@
   }
   function updateDefectDraftHint(){$('#defectDraftHint').textContent=state.defectDraft.length?'已勾选'+state.defectDraft.length+'种，应用后生效':'全部缺陷';}
   function renderDefectPicker(){
+    // Checkbox properties and selected classes can change without a render.
+    // Reset this small editor from its draft when reopening or discarding.
+    reportContent.delete($('#defectOptions'));
     const options=[...state.defectOptions],seen=new Set(options.map(item=>String(item.value)));state.defectDraft.forEach(value=>{if(!seen.has(value))options.push({value,label:value});});
     $('#defectSelectionLabel').textContent=state.defects.length?'已选 '+state.defects.length+' 种缺陷':'全部缺陷';
-    $('#defectOptions').innerHTML=options.length?options.map(item=>'<label class="defect-option '+(state.defectDraft.includes(String(item.value))?'selected':'')+'"><input type="checkbox" value="'+escape(item.value)+'"'+(state.defectDraft.includes(String(item.value))?' checked':'')+'><span>'+escape(item.label||item.value)+'</span><small>'+numberText(item.count)+'</small></label>').join(''):'<p>读取数据后显示可选缺陷。</p>';
-    $('#defectChips').innerHTML=state.defects.map(value=>'<button type="button" class="defect-chip" data-remove-defect="'+escape(value)+'" aria-label="移除 '+escape(value)+' 筛选">'+escape(value)+'<span aria-hidden="true">×</span></button>').join('');
+    replaceContent($('#defectOptions'),options.length?options.map(item=>'<label class="defect-option '+(state.defectDraft.includes(String(item.value))?'selected':'')+'"><input type="checkbox" value="'+escape(item.value)+'"'+(state.defectDraft.includes(String(item.value))?' checked':'')+'><span>'+escape(item.label||item.value)+'</span><small>'+numberText(item.count)+'</small></label>').join(''):'<p>读取数据后显示可选缺陷。</p>');
+    replaceContent($('#defectChips'),state.defects.map(value=>'<button type="button" class="defect-chip" data-remove-defect="'+escape(value)+'" aria-label="移除 '+escape(value)+' 筛选">'+escape(value)+'<span aria-hidden="true">×</span></button>').join(''));
     updateDefectDraftHint();
     if($('#defectPicker').open)positionDefectPicker();
   }
   function weldOpLabel(value){return value==='其他'?'未识别工位':value;}
   function renderWeldDrill(){
-    const host=$('#weldDrillFilters'),active=state.module==='weld'&&(state.weldDefectType!=='all'||state.weldOp!=='all'||state.weldLocation!=='all');host.hidden=!active;
-    host.innerHTML=active?'<span>明细定位</span>'+(state.weldDefectType!=='all'?'<button type="button" class="weld-drill-chip" data-clear-drill="defectType">分类：'+escape(state.weldDefectType)+' <span aria-hidden="true">×</span></button>':'')+(state.weldOp!=='all'?'<button type="button" class="weld-drill-chip" data-clear-drill="op">工位：'+escape(weldOpLabel(state.weldOp))+' <span aria-hidden="true">×</span></button>':'')+(state.weldLocation!=='all'?'<button type="button" class="weld-drill-chip" data-clear-drill="location">位置：'+escape(state.weldLocation)+' <span aria-hidden="true">×</span></button>':'')+'<button type="button" class="weld-drill-clear" data-clear-drill="all">清除定位</button>':'';
+    const host=$('#weldDrillFilters'),canBack=Boolean(currentQueryEntry()?.history?.length),active=state.module==='weld'&&(canBack||state.weldDefectType!=='all'||state.weldOp!=='all'||state.weldLocation!=='all');host.hidden=!active;
+    replaceContent(host,active?(canBack?'<button type="button" class="button" data-drill-back>← 返回上级查询</button>':'')+'<span>明细定位</span>'+(state.weldDefectType!=='all'?'<button type="button" class="weld-drill-chip" data-clear-drill="defectType">分类：'+escape(state.weldDefectType)+' <span aria-hidden="true">×</span></button>':'')+(state.weldOp!=='all'?'<button type="button" class="weld-drill-chip" data-clear-drill="op">工位：'+escape(weldOpLabel(state.weldOp))+' <span aria-hidden="true">×</span></button>':'')+(state.weldLocation!=='all'?'<button type="button" class="weld-drill-chip" data-clear-drill="location">位置：'+escape(state.weldLocation)+' <span aria-hidden="true">×</span></button>':'')+'<button type="button" class="weld-drill-clear" data-clear-drill="all">清除定位</button>':'');
   }
   function resetWeldDrill(){state.weldDefectType='all';state.weldOp='all';state.weldLocation='all';renderWeldDrill();}
   function defectRanking(report){
@@ -222,6 +280,7 @@
   }
   async function locateWeldRecords(index){
     const snapshot=weldDetail.snapshot,filters=weldDetail.actions[index];if(!snapshot||!filters||!state.authenticated)return;
+    const entry=currentQueryEntry();if(entry){entry.history.push(QueryState.normalizeQuery(snapshot.query,'weld',today()));entry.history=entry.history.slice(-12);}
     const query=snapshot.query;cancelRequest();clearTimer();state.page=1;state.defects=[...(filters.defects||[snapshot.item.defect])];state.defectDraft=[...state.defects];state.weldDefectType=filters.defectType||query.defectType||'all';state.weldOp=filters.op||query.op||'all';state.weldLocation=filters.location||query.location||'all';
     for(const [id,value] of [['#materialFilter',query.materialName||'all'],['#weldLineFilter',filters.line||query.line||'all']]){const select=$(id);if(![...select.options].some(option=>option.value===value))select.add(new Option(value,value));select.value=value;select.title=select.selectedOptions[0]?.textContent||'';}
     const rolling=query.rolling&&query.start===today()&&query.end===today();$('#rangeMode').value=rolling?'today':'custom';state.view=rolling?'live':'weekly';$('#startDate').value=query.start;$('#endDate').value=query.end;$('#keywordInput').value=query.keyword||'';closeWeldDefectDetail();renderDefectPicker();renderWeldDrill();await loadData('drill');$(state.error?'#readStatus':'#recordsTitle').scrollIntoView({behavior:'auto',block:'start'});
@@ -231,16 +290,18 @@
     const host=$('#weldReport'),report=state.result?.data.report,overview=report?.overview,live=(state.result?.query.view||state.view)==='live';
     $('#weldReportTitle').textContent=live?'当天缺陷概览':'所选日期缺陷统计';$('#recordsTitle').textContent=live?'最新焊接不合格记录':'焊接不合格记录明细';
     $('#weldReportSubtitle').textContent='默认全部线体、全部缺陷；筛选同步作用于统计和明细，不从当前分页推算全量。';
-    if(!overview){host.className='empty-state';host.textContent=state.result?'本次接口尚未提供全范围统计，以下只展示已读取明细。':'数据源就绪后自动加载真实缺陷日志。';return;}
+    if(!overview){host.className='empty-state';replaceContent(host,state.result?'本次接口尚未提供全范围统计，以下只展示已读取明细。':'数据源就绪后自动加载真实缺陷日志。');return;}
     host.className='dashboard-content';
-    const notes=list(report.notes),diagnostic=report.diagnostics||{},lineRows=list(report.lineSummary),defects=list(report.defectSummary),top=list(report.topLocations),trend=live?report.dailyTrend:report.trend;
+    const query=state.result.query,span=Math.round((Date.parse(query.end)-Date.parse(query.start))/86400000)+1,daily=live||span<=31;
+    const notes=list(report.notes),lineRows=list(report.lineSummary),top=list(report.topLocations),trend=daily?report.dailyTrend:report.trend;
     const lineLabels=lineRows.map(row=>row.line),maxLocation=Math.max(1,...top.map(row=>Number(row.recordCount)||0));
     const topChart=top.length?'<div class="location-bars">'+top.map(row=>'<div class="location-row"><div class="location-label"><span>'+escape(row.location)+'</span><strong>'+numberText(row.recordCount)+' 条</strong></div><div class="location-track">'+list(row.byLine).map(item=>'<span style="width:'+(Number(item.count)||0)/maxLocation*100+'%;background:'+lineColor(item.line)+'" title="'+escape(item.line)+'：'+numberText(item.count)+' 条"></span>').join('')+'</div></div>').join('')+'</div><div class="chart-legend">'+lineLabels.map(line=>'<span style="--legend-color:'+lineColor(line)+'">'+escape(line)+'</span>').join('')+'</div>':emptyChart();
     const detail=top.length?'<div class="table-wrap" tabindex="0"><table><thead><tr><th>缺陷位置</th><th>日志条数</th><th>涉及件数</th><th>占比</th><th>线体分布</th><th>缺陷分布</th></tr></thead><tbody>'+top.map(row=>'<tr><td>'+escape(row.location)+'</td><td>'+numberText(row.recordCount)+'</td><td>'+numberText(row.pieceCount)+'</td><td>'+percent(row.share)+'</td><td>'+escape(list(row.byLine).map(item=>item.line+' '+item.count).join(' / '))+'</td><td>'+escape(list(row.byDefect).map(item=>item.defect+' '+item.count).join(' / '))+'</td></tr>').join('')+'</tbody></table></div>':emptyChart('当前没有位置明细');
     const lineTable=lineRows.length?'<div class="table-wrap" tabindex="0"><table><thead><tr><th>线体</th><th>日志条数</th><th>涉及件数</th><th>条 / 件</th><th>缺陷分布</th></tr></thead><tbody>'+lineRows.map(row=>'<tr><td>'+escape(row.line)+'</td><td>'+numberText(row.recordCount)+'</td><td>'+numberText(row.pieceCount)+'</td><td>'+decimal(row.recordsPerPiece)+'</td><td>'+escape(list(row.byDefect).map(item=>item.defect+' '+item.count).join(' / '))+'</td></tr>').join('')+'</tbody></table></div>':emptyChart();
     const materials=list(report.materialSummary),materialCards=materials.length?'<div class="material-overview">'+materials.map((item,index)=>'<article class="material-card" style="--material-color:'+COLORS[index%COLORS.length]+'"><div class="material-title"><strong>'+escape(item.materialName||'未填写物料名称')+'</strong><span>'+escape(item.material||'料号待核实')+'</span></div><div class="material-stats"><span><strong>'+numberText(item.recordCount)+'</strong>日志条数</span><span><strong>'+numberText(item.pieceCount)+'</strong>涉及件数</span><span><strong>'+decimal(item.recordsPerPiece)+'</strong>条 / 件</span></div></article>').join('')+'</div>':emptyChart('当前筛选未取得物料汇总');
     const warnings=[];if(overview.unknownLineCount)warnings.push(numberText(overview.unknownLineCount)+' 条记录的线体待识别');if(overview.missingQrCount)warnings.push(numberText(overview.missingQrCount)+' 条记录缺少二维码');if(overview.duplicateRowsRetained)warnings.push(numberText(overview.duplicateRowsRetained)+' 条重复记录按源口径保留');
-    host.innerHTML='<div class="dashboard-kpis weld-kpis">'+dashboardMetric('缺陷日志条数',numberText(overview.recordCount),'当前筛选内的源记录')+dashboardMetric('涉及件数',numberText(overview.pieceCount),'按料号＋二维码去重')+dashboardMetric('条 / 件',decimal(overview.recordsPerPiece),'日志条数 ÷ 涉及件数')+dashboardMetric('已识别线体',numberText(overview.lineCount),'待确认线体单独显示')+dashboardMetric('缺陷类型',numberText(overview.defectTypeCount),'当前筛选的类型数')+dashboardMetric('涉及料号',numberText(overview.materialCount),'当前筛选的不同料号')+'</div>'+(warnings.length?'<div class="notice warning">'+warnings.map(escape).join('；')+'。</div>':'')+'<div class="dashboard-grid">'+chartPanel('按物料查看 · 产品与料号',materialCards,'待识别线体的记录仍按真实物料单独展示，不推测生产线归属。',true)+chartPanel('线体日志分布',horizontalBars(lineRows,{label:'line',value:'recordCount',color:item=>lineColor(item.line),maxItems:lineRows.length}),'按日志条数排名，不代表产量不良率。')+chartPanel('缺陷类型分布',defectRanking(report))+chartPanel('各线 OP 工位占比 · Top 5 + 其他',opDonuts(report.lineOpSummary),'每条线以自身筛选后的日志为分母，未识别工位并入“其他”。',true)+chartPanel(live?'所选日期趋势':'近五周趋势',live?trendChart(trend,{daily:true}):combinedTrend(trend),'未覆盖的日期保留缺失，不补零、不计算不完整期间的环比。',true)+chartPanel('缺陷位置 Top 5 · 线体构成',topChart,'位置未填写的记录仍包含在总条数中。',true)+chartPanel('各线体汇总',lineTable,'各线按同料号＋二维码去重，跨线件数不宜直接相加。',true)+chartPanel('Top 5 位置明细',detail,'',true)+'</div>'+(notes.length?'<div class="report-footnotes">'+notes.map(note=>'<p>'+escape(note)+'</p>').join('')+'</div>':'')+'<p class="report-note">本页展示缺陷日志及涉及件数，不能据此认定完工补焊数量。</p>';
+    const disclosure=(key,title,content,note='')=>'<details class="report-disclosure" data-disclosure="'+key+'"><summary>'+escape(title)+'</summary><div class="report-disclosure-body">'+content+(note?'<p class="report-note">'+escape(note)+'</p>':'')+'</div></details>';
+    replaceContent(host,'<nav class="analysis-nav report-jump-nav" aria-label="补焊查看位置"><button type="button" data-scroll="weldOverview">概览</button><button type="button" data-scroll="weldAnalysis">缺陷分析</button><button type="button" data-scroll="recordsTitle">原始记录</button></nav><section id="weldOverview" class="weld-report-overview" tabindex="-1"><div class="dashboard-kpis weld-kpis">'+dashboardMetric('缺陷日志条数',numberText(overview.recordCount),'当前筛选内的源记录')+dashboardMetric('涉及件数',numberText(overview.pieceCount),'按料号＋二维码去重')+dashboardMetric('条 / 件',decimal(overview.recordsPerPiece),'日志条数 ÷ 涉及件数')+dashboardMetric('已识别线体',numberText(overview.lineCount),'待确认线体单独显示')+dashboardMetric('缺陷类型',numberText(overview.defectTypeCount),'当前筛选的类型数')+dashboardMetric('涉及料号',numberText(overview.materialCount),'当前筛选的不同料号')+'</div>'+(warnings.length?'<div class="notice warning">'+warnings.map(escape).join('；')+'。</div>':'')+'<div class="dashboard-grid">'+chartPanel('线体日志分布',horizontalBars(lineRows,{label:'line',value:'recordCount',color:item=>lineColor(item.line),maxItems:lineRows.length}),'按日志条数排名，不代表产量不良率。')+chartPanel(daily?'所选日期 · 每日趋势':'截至结束日期的近五周趋势',daily?trendChart(trend,{daily:true}):combinedTrend(trend),'未覆盖的日期保留缺失，不补零、不计算不完整期间的环比。')+'</div>'+disclosure('materials','按物料查看 · '+materials.length+' 项',materialCards,'待识别线体的记录按真实物料展示，不推测生产线归属。')+'</section><section id="weldAnalysis" class="weld-report-analysis" tabindex="-1"><div class="section-heading"><h2>缺陷分析</h2><span class="muted">点击缺陷可逐级查看线体、工位与位置</span></div><div class="dashboard-grid">'+chartPanel('缺陷类型分布',defectRanking(report))+chartPanel('缺陷位置 Top 5 · 线体构成',topChart,'位置未填写的记录仍包含在总条数中。')+'</div>'+disclosure('ops','各线 OP 工位占比 · 按线体展开',opDonuts(report.lineOpSummary),'每条线以自身筛选后的日志为分母。相同 OP 使用固定颜色；未识别工位并入“其他”。')+disclosure('line-summary','各线体汇总',lineTable,'各线按同料号＋二维码去重，跨线件数不宜直接相加。')+disclosure('location-detail','Top 5 位置明细',detail)+'</section>'+disclosure('methodology','统计口径与完整性说明','<div class="report-footnotes">'+notes.map(note=>'<p>'+escape(note)+'</p>').join('')+'</div>')+'<p class="report-note">本页展示缺陷日志及涉及件数，不能据此认定完工补焊数量。</p>');
   }
   function alarmElapsed(value){
     if(!value)return '时间待核实';const timestamp=Date.parse(value),elapsed=Date.now()-timestamp;
@@ -274,7 +335,7 @@
   function renderAlarmReport(){
     if(state.module!=='alarm')return;
     const host=$('#alarmReport'),report=state.result?.data.alarmReport,kpis=report?.overview||report?.kpis;
-    if(!kpis){host.className='empty-state';host.textContent=state.result?'报警分析汇总尚未返回，以下明细保持原样。':'数据源就绪后自动加载真实报警记录。';return;}
+    if(!kpis){host.className='empty-state';replaceContent(host,state.result?'报警分析汇总尚未返回，以下明细保持原样。':'数据源就绪后自动加载真实报警记录。');return;}
     const laneScroll=new Map([...host.querySelectorAll('[data-lane-scroll]')].map(element=>[element.dataset.laneScroll,element.scrollTop])),expanded=new Set([...host.querySelectorAll('details[open][id]')].map(element=>element.id));
     host.className='dashboard-content';
     const colors={unresponded:'#ce454b',processing:'#6264d8',awaiting_restore:'#bb8015',completed:'#438268',unknown:'#8793a6'},steps=[{value:'unresponded',key:'unresponded',label:'待响应',note:'等待责任部门响应'},{value:'processing',key:'processing',label:'处理中',note:'已响应，处理中'},{value:'awaiting_restore',key:'awaitingRestore',label:'待复线',note:'已处理，等待复线'},{value:'completed',key:'completed',label:'已完成',note:'原系统已闭环'}];
@@ -288,11 +349,11 @@
     const overview='<div id="alarmOverview" class="dashboard-kpis alarm-kpis">'+dashboardMetric('总报警',numberText(kpis.recordCount),'所选创建日期范围内的记录')+dashboardMetric('未闭环',numberText(kpis.openCount),'原系统明确标记尚未闭环')+dashboardMetric('状态待核实',numberText(kpis.unknownCount),'缺失或冲突的状态信息')+durationMetric('response','平均响应时长')+durationMetric('handling','平均处理时长')+durationMetric('closure','平均复线时长')+'</div>';
     const statuses=list(report.statusCounts),total=statuses.reduce((sum,item)=>sum+(Number(item.count)||0),0);let cursor=0;const slices=statuses.map(item=>{const start=cursor;cursor+=(Number(item.count)||0)/Math.max(1,total)*100;return (colors[item.value]||'#a4b3c8')+' '+start+'% '+cursor+'%';});
     const ring='<div class="status-distribution"><div class="status-ring" style="--ring-fill:'+(total>0?'conic-gradient('+slices.join(',')+')':'#edf1f6')+'"><div><strong>'+numberText(kpis.recordCount)+'</strong><span>总报警</span></div></div><div class="status-legend">'+statuses.map(item=>'<div><span class="status-legend-name"><i style="background:'+(colors[item.value]||'#a4b3c8')+'"></i>'+escape(item.label||item.name)+'</span><strong>'+numberText(item.count)+'</strong><small>'+percent(total?item.count/total:0)+'</small></div>').join('')+'</div></div>';
-    host.innerHTML='<nav class="analysis-nav" aria-label="报警分析导航"><button type="button" data-scroll="alarmWorkBoard">处理队列</button><button type="button" data-scroll="alarmLineMatrix">线体进度</button><button type="button" data-scroll="alarmDepartment">部门进度</button><button type="button" data-scroll="alarmOverview">总览与趋势</button><button type="button" data-scroll="recordsTitle">报警明细</button></nav>'+progress+
+    replaceContent(host,'<nav class="analysis-nav" aria-label="报警分析导航"><button type="button" data-scroll="alarmWorkBoard">处理队列</button><button type="button" data-scroll="alarmLineMatrix">线体进度</button><button type="button" data-scroll="alarmDepartment">部门进度</button><button type="button" data-scroll="alarmOverview">总览与趋势</button><button type="button" data-scroll="recordsTitle">报警明细</button></nav>'+progress+
       '<details id="alarmLineMatrix" class="alarm-auxiliary work-section"><summary><span>线体处理进度</span><small>'+numberText(lines.length)+' 条线体 / 区域 · 展开矩阵</small></summary>'+chartPanel('线体处理进度',matrix,'按原系统线体或已配置规则细分；未匹配时保留原区域。')+'</details>'+
       '<details id="alarmDepartment" class="alarm-auxiliary work-section"><summary><span>部门处理进度</span><small>查看部门分布与归口依据</small></summary><div class="department-panel-content">'+departmentCards+'<p class="report-note">按已配置的报警类别规则归口；未匹配的记录保留“部门待确认”。点击部门或进度可筛选。</p></div></details>'+
       '<div class="section-heading"><div><h2>总览与趋势</h2><p class="muted">时长只使用有效且时序合理的记录；缺失趋势保留空缺。</p></div></div>'+overview+chartPanel('每日报警趋势',trendChart(report.dailyTrend,{daily:true,value:'total',title:'报警条数'}),'按所选创建日期范围统计，不代表全系统历史待处理数量。',true)+
-      '<details id="alarmMoreAnalysis" class="secondary-analysis"><summary>更多分析：状态分布、设备与区域排行</summary><div class="dashboard-grid">'+chartPanel('报警状态分布',ring,'未闭环数可能包含部分状态待核实的记录。')+chartPanel('设备报警 Top 10',horizontalBars(report.equipmentTop,{label:'name',color:'#4679b5'}))+chartPanel('产线 / 区域 Top 10',horizontalBars(report.lineTop,{label:'name',color:'#679aaa'}),'',true)+'</div></details><details id="alarmStatisticsNotes" class="alarm-stat-notes"><summary>统计说明</summary><div><p>数据源时间：'+escape(dateTime(state.result.data.sourceTime))+'；读取时间：'+escape(dateTime(state.result.successAt))+'。</p>'+[...list(report.notes),state.result.data.note].filter(Boolean).map(note=>'<p>'+escape(note)+'</p>').join('')+'</div></details>';
+      '<details id="alarmMoreAnalysis" class="secondary-analysis"><summary>更多分析：状态分布、设备与区域排行</summary><div class="dashboard-grid">'+chartPanel('报警状态分布',ring,'未闭环数可能包含部分状态待核实的记录。')+chartPanel('设备报警 Top 10',horizontalBars(report.equipmentTop,{label:'name',color:'#4679b5'}))+chartPanel('产线 / 区域 Top 10',horizontalBars(report.lineTop,{label:'name',color:'#679aaa'}),'',true)+'</div></details><details id="alarmStatisticsNotes" class="alarm-stat-notes"><summary>统计说明</summary><div><p>数据源时间：'+escape(dateTime(state.result.data.sourceTime))+'；读取时间：'+escape(dateTime(state.result.successAt))+'。</p>'+[...list(report.notes),state.result.data.note].filter(Boolean).map(note=>'<p>'+escape(note)+'</p>').join('')+'</div></details>');
     for(const [lane,scrollTop] of laneScroll){const element=host.querySelector('[data-lane-scroll="'+lane+'"]');if(element)element.scrollTop=scrollTop;}
     for(const id of expanded){const detail=document.getElementById(id);if(detail)detail.open=true;}
   }
@@ -306,7 +367,7 @@
     const labels={out:'缺货',low:'低库存',normal:'库存充足',unknown:'待核实'};
     return '<div class="spare-card-grid">'+data.rows.map(row=>{const status=Object.hasOwn(labels,row._stockStatus)?row._stockStatus:'unknown',qty=countValue(row._stockQuantity),min=countValue(row._stockMin),max=countValue(row._stockMax),gap=countValue(row._stockGap);return '<article class="spare-card '+status+'"><div class="spare-card-heading"><div><h3>'+escape(row.bjmc||'未填写备件名称')+'</h3><p>'+escape(row.bjbh||'编号待核实')+'</p></div><span class="stock-pill '+status+'">'+labels[status]+'</span></div><div class="spare-stock"><div><span>当前库存</span><strong>'+numberText(qty)+'</strong></div><div class="spare-thresholds"><span>最小 <b>'+numberText(min)+'</b></span><span>最大 <b>'+numberText(max)+'</b></span>'+(gap!==null&&gap>0?'<span class="spare-gap">距最低值差 '+numberText(gap)+'</span>':'')+'</div></div><div class="spare-location"><span>库位</span><strong>'+escape(row.location||'未填写')+'</strong></div><details class="spare-details"><summary>规格与详细信息</summary><dl><div><dt>规格型号</dt><dd>'+escape(row.specifications||'未填写')+'</dd></div><div><dt>备件类型</dt><dd>'+escape(row.sparepartName||'未填写')+'</dd></div><div><dt>备件二维码</dt><dd>'+escape(row.BarCode||'未填写')+'</dd></div><div><dt>创建时间</dt><dd>'+escape(dateTime(row.createOn))+'</dd></div></dl></details></article>';}).join('')+'</div>';
   }
-  function renderResult(){
+  function renderResult({content=true}={}){
     const result=state.result,data=result&&result.data,status=$('#readStatus');status.className='read-status';
     if(state.error){status.classList.add('error');status.textContent=`读取失败：${state.error}${result?' 当前保留上次成功数据（'+scopeText(result.query)+'）。':' 尚无成功数据可显示。'}`;}
     else if(state.loading){status.classList.add('loading');status.textContent=result?'正在读取当前条件，暂时显示上次成功数据。':'正在读取真实接口，请稍候…';}
@@ -320,12 +381,13 @@
     $('#totalCaption').textContent=data?`当前条件下实际已读取的记录${countValue(data.sourceTotal)!==null?'；来源报告总量 '+numberText(countValue(data.sourceTotal))+' 条':''}${state.module==='weld'?'。不等于补焊点数或去重件数。':''}`:'等待真实接口返回';
     $('#lastSuccess').textContent=result?dateTime(result.successAt):'—';$('#sourceTime').textContent=data?dateTime(data.sourceTime):'—';
     $('#completeness').textContent=!data?'完整性尚未核实':data.complete===true?'分页条数已核对（截至本次读取）':data.complete===false?'数据可能不完整，请结合读取提示核对':'接口未确认完整性';
-    $('#dataTable').className=data?'':'empty-state';$('#dataTable').innerHTML=data?(state.module==='spares'&&state.sparesView==='cards'?renderSpareCards(data):renderTable(data)):(state.connected?'当前模块尚无成功读取结果。':'数据源就绪后自动读取真实记录。');
+    const updateContent=content&&(rendered.module!==state.module||rendered.data!==data),scroll={left:window.scrollX,top:window.scrollY};
+    if(updateContent){$('#dataTable').className=data?'':'empty-state';replaceContent($('#dataTable'),data?(state.module==='spares'&&state.sparesView==='cards'?renderSpareCards(data):renderTable(data)):(state.connected?'当前模块尚无成功读取结果。':'数据源就绪后自动读取真实记录。'));}
     $('#resultScope').textContent=result?`当前展示：${scopeText(result.query)} · 图表与明细使用相同筛选。`:'查询后展示接口字段。';
     const page=data?Number(data.page)||result.query.page:state.page,size=data?Number(data.size)||result.query.size:state.size,total=data?countValue(data.total):null,pages=total!==null?Math.max(1,Math.ceil(total/size)):null;
     $('#pageSummary').textContent=data?`本页 ${data.rows.length} 条${Number.isFinite(total)?' / 共 '+total.toLocaleString('zh-CN')+' 条':''}`:'尚未读取';$('#pageNumber').textContent=data?`${page}${pages?' / '+pages:''}`:'—';
     $('#prevPage').disabled=!state.connected||state.loading||!data||page<=1;$('#nextPage').disabled=!state.connected||state.loading||!data||(pages!==null?page>=pages:data.rows.length<size);
-    renderWeldDrill();renderWeldReport();renderAlarmReport();renderSparesReport();
+    renderWeldDrill();renderDraftHint();if(updateContent){renderWeldReport();renderAlarmReport();renderSparesReport();rendered.module=state.module;rendered.data=data;window.scrollTo({left:scroll.left,top:scroll.top,behavior:'instant'});}
   }
   function resetDates(){const day=today();$('#rangeMode').value='today';$('#startDate').value=day;$('#endDate').value=day;syncDateFields();}
   function syncDateFields(){const spares=state.module==='spares',rolling=$('#rangeMode').value==='today';if(state.module==='weld')state.view=rolling?'live':'weekly';$('#rangeModeField').hidden=spares;$('#startField').hidden=spares;$('#endField').hidden=spares;$('#startDate').disabled=spares;$('#endDate').disabled=spares;if(rolling)$('#startDate').value=$('#endDate').value=today();}
@@ -342,20 +404,23 @@
   function renderModule(){
     document.body.classList.toggle('inventory-mode',state.module==='spares');
     document.body.classList.toggle('vision-mode',state.module==='vision');
+    document.body.classList.toggle('tools-mode',state.module==='tools');
+    const standalone=['spares','vision','tools'].includes(state.module);$$('.filter-panel,.metrics,.records-panel,#readStatus').forEach(node=>node.hidden=standalone);if($('#toolsWorkbench'))$('#toolsWorkbench').hidden=state.module!=='tools';
     document.body.classList.toggle('alarm-mode',state.module==='alarm');if(state.module!=='alarm')closeAlarmDetail();if(state.module!=='weld')closeWeldDefectDetail();
     layoutAlarmFilters();
     const config=MODULES[state.module],title=config.title;$('#pageTitle').textContent=title;$('#breadcrumb').textContent=title;$('#pageDescription').textContent=config.description;$('#moduleNotice').textContent=config.notice;
     document.title=title+' · 工艺部业务门户';$$('.nav-link').forEach(link=>{const active=link.dataset.route===routeKey();link.classList.toggle('active',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');});
     $('#weldReportSection').hidden=state.module!=='weld';$('#categoryField').hidden=state.module!=='spares';$('#importSection').hidden=state.module!=='spares';
     $('#alarmReportSection').hidden=state.module!=='alarm';['#materialField','#weldLineField','#defectField'].forEach(id=>$(id).hidden=state.module!=='weld');['#alarmStatusField','#alarmLineField','#alarmDepartmentField'].forEach(id=>$(id).hidden=state.module!=='alarm');
-    $('#quickRanges').hidden=state.module!=='alarm';
+    $('#quickRanges').hidden=!allowPolling();$('#quickRanges').setAttribute('aria-label','快捷日期');
     $('#stockField').hidden=state.module!=='spares';$('#sparesReportSection').hidden=state.module!=='spares';
     $('#recordsTitle').textContent=state.module==='weld'?(state.view==='live'?'最新焊接不合格记录':'焊接不合格记录明细'):state.module==='alarm'?'报警记录明细':'备件记录明细';
     $$('[data-view]').forEach(button=>{const active=button.dataset.view===state.view;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));});
     renderConnection();renderResult();
   }
-  function switchModule(){const id=location.hash.slice(1);closeWeldDefectDetail();resetWeldDrill();cancelRequest();clearTimer();if(id==='alarm'||id==='spares'||id==='vision'){state.module=id;}else{state.module='weld';state.view='live';if(id!=='weld-live')history.replaceState(null,'','#weld-live');}state.page=1;state.result=state.cache.get(cacheKey())||null;state.error='';$('#keywordInput').value='';$('#categoryFilter').value='all';$('#stockFilter').value='all';['#materialFilter','#weldLineFilter','#alarmStatusFilter','#alarmLineFilter','#alarmDepartmentFilter'].forEach(id=>$(id).value='all');state.defects=[];state.defectDraft=[];$('#defectPicker').open=false;renderDefectPicker();resetDates();closeNav();state.polling=!['spares','vision'].includes(state.module);renderModule();if(canRead())loadData('route');}
-  function queryChanged(){cancelRequest();clearTimer();state.page=1;loadData('filter');}
+  function switchModule(){const id=location.hash.slice(1);if(!['','weld-live','alarm','spares','vision','tools'].includes(id)&&document.getElementById(id))return;const previousModule=state.module;saveQuerySettings();closeWeldDefectDetail();cancelRequest();clearTimer();state.module=['alarm','spares','vision','tools'].includes(id)?id:'weld';if(state.module==='weld'&&id!=='weld-live')history.replaceState(null,'','#weld-live');state.result=state.cache.get(cacheKey())||null;state.error='';restoreModuleQuery();closeNav();renderModule();if(previousModule!==state.module)window.scrollTo({top:0,left:0,behavior:'instant'});if(canRead())loadData('route');}
+  function queryChanged({keepHistory=false}={}){cancelRequest();clearTimer();state.page=1;if(!keepHistory&&currentQueryEntry())currentQueryEntry().history=[];loadData('filter');}
+  async function previousQuery(){const entry=currentQueryEntry(),query=entry?.history.pop();if(!query)return;cancelRequest();clearTimer();entry.query=query;applyQuery(query);persistQueries();await loadData('route');renderWeldDrill();renderDraftHint();}
   function openSourceConnection(){if(!state.authenticated||state.status?.role!=='admin')return;$('#sourceConnectError').hidden=true;$('#sourcePasswordInput').value='';if(!$('#connectionDialog').open)$('#connectionDialog').showModal();$('#sourceUsernameInput').focus();}
 
   function validImportFile(file){return Boolean(file&&/\.csv$/i.test(file.name)&&file.size>0&&file.size<=1024*1024);}
@@ -393,35 +458,36 @@
   $('#loginForm').addEventListener('submit',async event=>{
     event.preventDefault();const username=$('#usernameInput').value.trim(),password=$('#passwordInput').value;if(!username||!password)return;
     invalidateStatusRequest();cancelRequest();$('#loginSubmit').disabled=true;$('#loginError').hidden=true;
-    try{const pending=api('/local/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});$('#passwordInput').value='';await pending;invalidateStatusRequest();cancelRequest();state.cache.clear();state.result=null;state.error='';await checkStatus();if(!state.authenticated)throw new Error('尚未确认门户登录，请检查工号或本地服务。');$('#usernameInput').value='';$('#importFile').value='';resetImport();state.polling=!['spares','vision'].includes(state.module);renderConnection();renderResult();if(canRead()&&!state.result)await loadData('login');else schedulePolling();}
+    try{const pending=api('/local/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});$('#passwordInput').value='';await pending;invalidateStatusRequest();cancelRequest();state.cache.clear();state.result=null;state.error='';await checkStatus();if(!state.authenticated)throw new Error('尚未确认门户登录，请检查工号或本地服务。');$('#usernameInput').value='';$('#importFile').value='';resetImport();state.polling=allowPolling()&&state.polling;renderConnection();renderResult();if(canRead()&&!state.result)await loadData('login');else schedulePolling();}
     catch(error){$('#loginError').hidden=false;$('#loginError').textContent=errorText(error);}
     finally{$('#passwordInput').value='';$('#loginSubmit').disabled=false;}
   });
   $('#connectionForm').addEventListener('submit',async event=>{
     event.preventDefault();const username=$('#sourceUsernameInput').value.trim(),password=$('#sourcePasswordInput').value;if(!username||!password||!state.authenticated||state.status?.role!=='admin')return;
     invalidateStatusRequest();cancelRequest();clearTimer();$('#sourceConnectSubmit').disabled=true;$('#sourceConnectSubmit').textContent='正在验证…';$('#sourceConnectError').hidden=true;
-    try{const pending=api('/local/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});$('#sourcePasswordInput').value='';const result=await pending;invalidateStatusRequest();cancelRequest();if(result.sourceStatus&&state.status)state.status.sourceStatus=result.sourceStatus;state.connected=result.connected===true;state.cache.clear();state.result=null;state.error='';await checkStatus();if(!state.authenticated)throw new Error('门户登录已过期，请重新使用工号登录。');if(!state.connected)throw new Error('设置尚未验证成功，请检查账号权限或数据源状态。');$('#sourceUsernameInput').value='';$('#connectionDialog').close();state.polling=!['spares','vision'].includes(state.module);renderConnection();if(!state.result)await loadData('configure');else schedulePolling();notify('数据源设置已保存，今后登录门户会自动读取。');}
+    try{const pending=api('/local/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});$('#sourcePasswordInput').value='';const result=await pending;invalidateStatusRequest();cancelRequest();if(result.sourceStatus&&state.status)state.status.sourceStatus=result.sourceStatus;state.connected=result.connected===true;state.cache.clear();state.result=null;state.error='';await checkStatus();if(!state.authenticated)throw new Error('门户登录已过期，请重新使用工号登录。');if(!state.connected)throw new Error('设置尚未验证成功，请检查账号权限或数据源状态。');$('#sourceUsernameInput').value='';$('#connectionDialog').close();state.polling=allowPolling()&&state.polling;renderConnection();if(!state.result)await loadData('configure');else schedulePolling();notify('数据源设置已保存，今后登录门户会自动读取。');}
     catch(error){if(error.sourceStatus&&state.status)state.status.sourceStatus=error.sourceStatus;if(error.status===401)await checkStatus();if(!state.authenticated){$('#connectionDialog').close();$('#loginError').textContent='门户登录已过期，请重新使用工号登录。';$('#loginError').hidden=false;}else{$('#sourceConnectError').textContent=errorText(error);$('#sourceConnectError').hidden=false;}renderConnection();scheduleStatus();}
     finally{$('#sourcePasswordInput').value='';$('#sourceConnectSubmit').disabled=false;$('#sourceConnectSubmit').textContent='验证并保存设置';}
   });
-  $('#logoutButton').addEventListener('click',async()=>{stopPolling();cancelRequest();invalidateStatusRequest();$('#logoutButton').disabled=true;try{await api('/local/logout',{method:'POST'});invalidateStatusRequest();cancelRequest();state.authenticated=false;state.connected=false;state.status=null;state.result=null;state.cache.clear();state.error='';$('#usernameInput').value='';$('#passwordInput').value='';$('#sourceUsernameInput').value='';$('#sourcePasswordInput').value='';$('#connectionDialog').close();$('#importFile').value='';resetImport();renderConnection();renderResult();notify('已退出门户并清除当前页面的数据。');}catch(error){notify('退出请求失败：'+errorText(error));}finally{$('#logoutButton').disabled=false;scheduleStatus();}});
+  $('#logoutButton').addEventListener('click',async()=>{stopPolling();cancelRequest();invalidateStatusRequest();$('#logoutButton').disabled=true;try{await api('/local/logout',{method:'POST'});invalidateStatusRequest();cancelRequest();state.authenticated=false;state.connected=false;state.status=null;syncQueryAccount(null);state.result=null;state.cache.clear();state.error='';$('#usernameInput').value='';$('#passwordInput').value='';$('#sourceUsernameInput').value='';$('#sourcePasswordInput').value='';$('#connectionDialog').close();$('#importFile').value='';resetImport();renderConnection();renderResult();notify('已退出门户并清除当前页面的数据。');}catch(error){notify('退出请求失败：'+errorText(error));}finally{$('#logoutButton').disabled=false;scheduleStatus();}});
   $('#alarmReport').addEventListener('click',event=>{
     const button=event.target.closest('button');if(!button)return;if(button.dataset.alarmCard){openAlarmDetail(button.dataset.alarmCard);return;}if(button.dataset.scroll){const target=document.getElementById(button.dataset.scroll);if(target?.tagName==='DETAILS')target.open=true;target?.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});return;}
-    const fields=[['alarmStatus','#alarmStatusFilter'],['alarmLine','#alarmLineFilter'],['alarmDepartment','#alarmDepartmentFilter']];let changed=false;for(const [key,id] of fields){if(button.dataset[key]!==undefined){const select=$(id),value=button.dataset[key];if(![...select.options].some(option=>option.value===value))select.add(new Option(value,value));select.value=value;changed=true;}}if(changed){queryChanged();$('#queryForm').scrollIntoView({behavior:'auto',block:'start'});}
+    const fields=[['alarmStatus','#alarmStatusFilter'],['alarmLine','#alarmLineFilter'],['alarmDepartment','#alarmDepartmentFilter']];if(fields.some(([key])=>button.dataset[key]!==undefined)){const entry=currentQueryEntry();if(entry&&state.result){entry.history.push(QueryState.normalizeQuery(state.result.query,'alarm',today()));entry.history=entry.history.slice(-12);applyQuery(state.result.query);}}let changed=false;for(const [key,id] of fields){if(button.dataset[key]!==undefined){const select=$(id),value=button.dataset[key];if(![...select.options].some(option=>option.value===value))select.add(new Option(value,value));select.value=value;changed=true;}}if(changed){queryChanged({keepHistory:true});$('#queryForm').scrollIntoView({behavior:'auto',block:'start'});}
   });
   $('#closeAlarmDetail').addEventListener('click',closeAlarmDetail);
   $('#alarmDetailDialog').addEventListener('click',event=>{if(event.target===$('#alarmDetailDialog')){const bounds=event.target.getBoundingClientRect();if(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom)closeAlarmDetail();}});
-  $('#weldReport').addEventListener('click',event=>{const mode=event.target.closest('[data-defect-catalog]');if(mode){weldRanking.mode=mode.dataset.defectCatalog;renderWeldReport();$('#weldReport').querySelector('[data-defect-catalog="'+weldRanking.mode+'"]')?.focus();return;}const button=event.target.closest('[data-defect-detail]');if(button)openWeldDefectDetail(Number(button.dataset.defectDetail));});
+  $('#weldReport').addEventListener('click',event=>{const jump=event.target.closest('[data-scroll]');if(jump){const target=document.getElementById(jump.dataset.scroll);if(target){target.setAttribute('tabindex','-1');target.focus({preventScroll:true});target.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});}return;}const mode=event.target.closest('[data-defect-catalog]');if(mode){weldRanking.mode=mode.dataset.defectCatalog;renderWeldReport();$('#weldReport').querySelector('[data-defect-catalog="'+weldRanking.mode+'"]')?.focus();return;}const button=event.target.closest('[data-defect-detail]');if(button)openWeldDefectDetail(Number(button.dataset.defectDetail));});
   $('#weldReport').addEventListener('change',event=>{if(event.target.id==='defectParentPicker'){weldRanking.parent=event.target.value;renderWeldReport();$('#defectParentPicker')?.focus();}});
   $('#closeWeldDefectDetail').addEventListener('click',closeWeldDefectDetail);
   $('#weldDefectDialog').addEventListener('cancel',event=>{event.preventDefault();closeWeldDefectDetail();});
   $('#weldDefectDialog').addEventListener('click',event=>{if(event.target===$('#weldDefectDialog')){const bounds=event.target.getBoundingClientRect();if(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom)closeWeldDefectDetail();}});
   $('#weldDefectBody').addEventListener('click',event=>{const button=event.target.closest('[data-weld-records]');if(button)locateWeldRecords(Number(button.dataset.weldRecords));});
   $('#weldDefectBody').addEventListener('change',event=>{if(event.target.id==='defectDetailLine'){weldDetail.line=event.target.value;renderWeldDefectDetail();$('#defectDetailLine').focus();}});
-  $('#weldDrillFilters').addEventListener('click',event=>{const button=event.target.closest('[data-clear-drill]');if(!button)return;if(button.dataset.clearDrill==='location')state.weldLocation='all';else{state.weldOp='all';state.weldLocation='all';if(button.dataset.clearDrill!=='op')state.weldDefectType='all';}renderWeldDrill();queryChanged();});
+  $('#weldDrillFilters').addEventListener('click',event=>{if(event.target.closest('[data-drill-back]')){previousQuery();return;}const button=event.target.closest('[data-clear-drill]');if(!button)return;if(button.dataset.clearDrill==='location')state.weldLocation='all';else{state.weldOp='all';state.weldLocation='all';if(button.dataset.clearDrill!=='op')state.weldDefectType='all';}renderWeldDrill();queryChanged();});
   $('#queryForm').addEventListener('submit',event=>{event.preventDefault();queryChanged();});$('#refreshButton').addEventListener('click',()=>loadData('manual'));
-  $('#rangeMode').addEventListener('change',()=>{if(state.module==='weld')resetWeldDrill();syncDateFields();queryChanged();});['#categoryFilter','#stockFilter','#materialFilter','#weldLineFilter','#alarmStatusFilter','#alarmLineFilter','#alarmDepartmentFilter'].forEach(id=>$(id).addEventListener('change',()=>{if(id==='#materialFilter'||id==='#weldLineFilter')resetWeldDrill();if(id==='#materialFilter'){$('#weldLineFilter').value='all';$('#weldLineFilter').title='全部线体';}queryChanged();}));
-  ['#startDate','#endDate'].forEach(id=>$(id).addEventListener('change',()=>{if(state.module==='alarm'||state.module==='weld'){$('#rangeMode').value='custom';if(state.module==='weld'){state.view='weekly';resetWeldDrill();}}}));
+  $('#rangeMode').addEventListener('change',()=>{if(state.module==='weld')resetWeldDrill();syncDateFields();renderDraftHint();});['#categoryFilter','#stockFilter','#materialFilter','#weldLineFilter','#alarmStatusFilter','#alarmLineFilter','#alarmDepartmentFilter'].forEach(id=>$(id).addEventListener('change',()=>{if(id==='#materialFilter'||id==='#weldLineFilter')resetWeldDrill();if(id==='#materialFilter'){$('#weldLineFilter').value='all';$('#weldLineFilter').title='全部线体';}renderDraftHint();}));
+  ['#startDate','#endDate'].forEach(id=>$(id).addEventListener('input',()=>{if(allowPolling()){$('#rangeMode').value='custom';if(state.module==='weld'){state.view='weekly';resetWeldDrill();}renderDraftHint();}}));
+  $('#keywordInput').addEventListener('input',renderDraftHint);
   $$('[data-spares-view]').forEach(button=>button.addEventListener('click',()=>{state.sparesView=button.dataset.sparesView;$$('[data-spares-view]').forEach(item=>{const active=item.dataset.sparesView===state.sparesView;item.classList.toggle('active',active);item.setAttribute('aria-pressed',String(active));});renderResult();}));
   $$('[data-days]').forEach(button=>button.addEventListener('click',()=>{const days=Number(button.dataset.days),day=today();$('#rangeMode').value=days===1?'today':'custom';$('#startDate').value=shiftDate(day,1-days);$('#endDate').value=day;syncDateFields();queryChanged();}));
   $('#defectOptions').addEventListener('change',event=>{const checkbox=event.target.closest('input[type="checkbox"]');if(!checkbox)return;state.defectDraft=checkbox.checked?[...new Set([...state.defectDraft,checkbox.value])]:state.defectDraft.filter(value=>value!==checkbox.value);checkbox.closest('.defect-option').classList.toggle('selected',checkbox.checked);updateDefectDraftHint();});
@@ -430,11 +496,11 @@
   $('#defectPicker').addEventListener('toggle',()=>{if($('#defectPicker').open){state.defectDraft=[...state.defects];renderDefectPicker();}});
   $('#applyDefects').addEventListener('click',()=>{resetWeldDrill();state.defects=[...state.defectDraft];$('#defectPicker').open=false;renderDefectPicker();queryChanged();});
   $('#defectChips').addEventListener('click',event=>{const button=event.target.closest('[data-remove-defect]');if(!button)return;resetWeldDrill();state.defects=state.defects.filter(value=>value!==button.dataset.removeDefect);state.defectDraft=[...state.defects];renderDefectPicker();queryChanged();});
-  $('#pageSize').addEventListener('change',()=>{state.size=Number($('#pageSize').value);queryChanged();});
+  $('#pageSize').addEventListener('change',()=>{cancelRequest();state.size=Number($('#pageSize').value);state.page=1;loadData('page');});
   $('#prevPage').addEventListener('click',()=>{state.page=Math.max(1,(Number(state.result?.data.page)||state.result?.query.page||1)-1);loadData('page');});
   $('#nextPage').addEventListener('click',()=>{state.page=(Number(state.result?.data.page)||state.result?.query.page||1)+1;loadData('page');});
-  $('#pollButton').addEventListener('click',()=>{if(state.polling){stopPolling();return;}if(!canRead())return;state.polling=true;renderPolling();if(!state.request)loadData('poll');});
-  $('#pollInterval').addEventListener('change',()=>{state.interval=Number($('#pollInterval').value);renderPolling();schedulePolling();});
+  $('#pollButton').addEventListener('click',()=>{if(state.polling){stopPolling();return;}if(!canRead())return;state.polling=true;saveQuerySettings();renderPolling();if(!state.request)loadData('poll');});
+  $('#pollInterval').addEventListener('change',()=>{state.interval=Number($('#pollInterval').value);saveQuerySettings();renderPolling();schedulePolling();});
   document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimer();invalidateStatusRequest();if(state.polling)cancelRequest();renderPolling();}else{checkStatus();if(state.polling&&state.connected){renderPolling();loadData('poll');}}});
   $$('[data-view]').forEach(button=>button.addEventListener('click',()=>{if(state.view===button.dataset.view)return;cancelRequest();stopPolling();state.view=button.dataset.view;state.page=1;state.result=state.cache.get(cacheKey())||null;state.error='';resetDates();renderModule();if(state.connected)loadData('view');}));
   $('#importFile').addEventListener('change',()=>{const file=$('#importFile').files[0];resetImport(!file?undefined:!validImportFile(file)?'请选择非空的 CSV UTF-8 文件，大小不超过 1 MB；Excel 文件请先另存为 CSV。':`已选择 ${file.name}（${Math.ceil(file.size/1024)} KB），点击“预览校验”检查清单。`);});
@@ -442,8 +508,8 @@
   document.addEventListener('click',event=>{if($('#defectPicker').open&&!$('#defectPicker').contains(event.target))$('#defectPicker').open=false;});
   document.addEventListener('keydown',event=>{if(event.key==='Escape')$('#defectPicker').open=false;});
   window.addEventListener('resize',positionDefectPicker);document.addEventListener('scroll',positionDefectPicker,true);
-  window.addEventListener('hashchange',switchModule);window.addEventListener('beforeunload',()=>{clearTimer();invalidateStatusRequest();cancelRequest();});
-  document.addEventListener('portal:session-expired',()=>{invalidateStatusRequest();cancelRequest();state.authenticated=false;state.connected=false;state.status=null;state.cache.clear();state.result=null;stopPolling();renderConnection();renderResult();$('#loginError').textContent='门户登录已过期，请重新使用工号登录。';$('#loginError').hidden=false;});
+  window.addEventListener('hashchange',switchModule);window.addEventListener('beforeunload',()=>{saveQuerySettings();clearTimer();invalidateStatusRequest();cancelRequest();});
+  document.addEventListener('portal:session-expired',()=>{invalidateStatusRequest();cancelRequest();state.authenticated=false;state.connected=false;state.status=null;syncQueryAccount(null);state.cache.clear();state.result=null;stopPolling();renderConnection();renderResult();$('#loginError').textContent='门户登录已过期，请重新使用工号登录。';$('#loginError').hidden=false;});
   document.addEventListener('portal:refresh-status',()=>{invalidateStatusRequest();checkStatus();});
   switchModule();checkStatus({read:true});
 })();

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>检具与三坐标对比工具</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="../shared.css"></head><body><nav class="tool-shell" aria-label="工具导航"><a href="../../#tools" data-portal-return>← 返回工具中心</a><span class="tool-brand">工艺部 · 工具中心</span><span class="tool-local">浏览器内处理 · 文件不上传</span></nav><main class="wrap">
+<header><h1>检具与三坐标对比工具</h1><p>拖入两份Excel，查看每件的现场值、三坐标值和差值。</p><div class="local">本地运行 · 不上传文件 · 无需联网</div></header>
+<section class="card" id="import-card"><h2>导入报告</h2><p class="note">适用于当前现场检具与三坐标报表格式，支持 .xlsx / .xlsm。可把两份文件一起拖到此处，自动识别。</p>
+<div class="uploads"><div class="drop" id="vision-drop" tabindex="0" role="button" aria-label="选择现场检具报告"><b>现场检具报告</b><span class="hint">拖入文件，或点击选择</span><div class="file-name" id="vision-name">尚未导入</div><input class="file-input" type="file" id="vision-file" accept=".xlsx,.xlsm" multiple aria-label="现场检具报告"><div class="sheet-row" id="vision-sheet-row" hidden><label for="vision-sheet">数据页</label><select id="vision-sheet"></select></div></div>
+<div class="drop" id="cmm-drop" tabindex="0" role="button" aria-label="选择三坐标报告"><b>三坐标报告</b><span class="hint">拖入文件，或点击选择</span><div class="file-name" id="cmm-name">尚未导入</div><input class="file-input" type="file" id="cmm-file" accept=".xlsx,.xlsm" multiple aria-label="三坐标报告"><div class="sheet-row" id="cmm-sheet-row" hidden><label for="cmm-sheet">产线 / 数据页</label><select id="cmm-sheet"></select></div></div></div>
+<div class="toolbar"><span class="note">两份报告导入后自动比对；单个文件最多 64 MB。</span><span class="spacer"></span><button type="button" id="reset">清空，重新导入</button></div><div class="message" id="status" role="status" aria-live="polite">请导入现场检具报告和三坐标报告。</div></section>
+<section class="card" id="empty-state"><div class="blank"><strong>导入后，数据会显示在这里</strong><p>按点位看多件的变化，也可以按工件看所有点。</p><p>同一工件编号自动匹配，现场值、三坐标值同时画在图中。</p></div></section>
+<section class="card" id="result" hidden><div class="result-top"><div><h2>逐件数据对比</h2><div class="counts" id="counts"></div></div><div class="actions"><button type="button" id="download">保存本次结果（HTML）</button><button type="button" id="new-import" hidden>导入新报告</button></div></div>
+<div class="saved-banner" id="saved-banner" hidden></div><details class="match-info" id="matching"><summary id="matching-summary">查看匹配情况</summary><div class="body" id="matching-body"></div></details>
+<div class="reading-note"><strong>差值按“现场值 − 三坐标值”计算，统一理论基准后以＋／－显示。</strong>单位：mm。</div>
+<div class="tabs" role="tablist" aria-label="查看方式"><button type="button" id="tab-point" role="tab" aria-selected="true" aria-controls="point-view">按点位看多件</button><button type="button" id="tab-sample" role="tab" aria-selected="false" aria-controls="sample-view">按工件看所有点</button></div>
+<div class="toolbar"><label for="threshold">标记相差大于</label><input id="threshold" type="number" min="0.0001" step="0.01" value="0.2" aria-label="标记差值阈值"><span class="note">mm</span><span class="spacer"></span><label><input id="only-exceed" type="checkbox"> 表格只看超过此值的项目</label></div>
+<div id="point-view" role="tabpanel" aria-labelledby="tab-point"><div class="toolbar"><label for="point-select">点位方向</label><select id="point-select"></select><input type="search" id="point-search" placeholder="查找点号 / 名称" aria-label="查找点号或名称"></div><div id="point-content"></div></div>
+<div id="sample-view" role="tabpanel" aria-labelledby="tab-sample" hidden><div class="toolbar"><label for="sample-select">选择工件</label><select id="sample-select"></select></div><div id="sample-content"></div></div>
+<details class="explanation"><summary>数据口径与文件说明</summary><p>“现场值”“三坐标值”直接取自两份原表。原表记录的是相对理论尺寸的偏差。差值 = 现场值 − 三坐标值 +（现场理论值 − 三坐标理论值）；理论值不同时会在该点注明。</p><p>按工件编号、点号及X/Y/Z方向匹配。轮廓度、Size等不同评价项目不混入坐标对比。同一编号的现场复测分别列出；无法唯一确定的三坐标重复记录和点位会在匹配情况中说明。</p><p>曲线按现场测量时间排列。不同日期可能对应不同工件，曲线变化表示本次配对数据的变化。</p><p>文件只在当前浏览器内处理。工具不会执行Excel中的宏，也不会重算公式；使用报表已保存的数值。关闭页面不会保存导入内容，可用“保存本次结果”留存一份HTML。</p><p id="version">本工具内置JSZip 3.10.1（MIT许可），用于读取Excel文件。</p></details></section>
+<footer class="foot">保存的结果 HTML 包含图表与本地组件，可离线查看，也可继续导入同格式报告。</footer></main>
+<script type="application/json" id="saved-result">null</script>
+<script src="../vendor/jszip.min.js"></script><script src="core.js"></script><script src="../bridge.js"></script>
+<script src="app.js"></script>
+</body></html>
