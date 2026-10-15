@@ -11,6 +11,7 @@
     vision: {title:'视觉检具',description:'按线体和检具查看检测结果、合格率趋势与测点明细。',notice:'仅纳入普通检测，排除 ALLmeasure 全检。统计按检测次数计算，同一 SN 复测分别保留。'},
     penetration: {title:'熔深合格率',description:'按公司周、月份、检测类别和产品代号查看合格率与检测统计。',notice:'合格率采用来源配置口径。未判定数量单独显示，不将缺失结果补填为合格。'},
     spares: {title:'备件管理',description:'入库、出库与盘点，在手机和电脑上完成；成员操作按登录工号留痕。',notice:'库存变化以公司系统回写确认为准。'},
+    settings: {title:'设置',description:'查看个人账号，管理门户成员与权限。',notice:'成员管理仅对管理员开放；账号权限以门户保存结果为准。'},
     tools: {title:'工艺工具',description:'焊接参数导出、检具与三坐标对比，在统一工作台中完成。',notice:'选择工具并导入本地文件，查看校验结果后再导出。'}
   };
   const state = {status:null,authenticated:false,connected:false,module:'weld',view:'live',sparesView:'cards',defects:[],defectDraft:[],defectOptions:[],weldDefectType:'all',weldOp:'all',weldLocation:'all',page:1,size:50,result:null,error:'',loading:false,request:null,polling:true,interval:30,timer:null,statusTimer:null,cache:new Map(),statusLoading:false,statusRequest:null,authEpoch:0};
@@ -58,6 +59,7 @@
     window.InventoryWorkbench?.setContext(state.authenticated?state.status:null,state.module==='spares');
     window.VisionWorkbench?.setContext(state.authenticated?state.status:null,state.module==='vision');
     window.PortalTools?.setContext(state.authenticated?state.status:null,state.module==='tools');
+    window.SettingsWorkbench?.setContext(state.authenticated?state.status:null,state.module==='settings');
     window.PenetrationWorkbench?.setContext(state.authenticated?state.status:null,state.module==='penetration');
     $('#appShell').hidden=!state.authenticated;$('#loginScreen').hidden=state.authenticated;document.body.classList.toggle('logged-out',!state.authenticated);
     if(!state.authenticated){closeAlarmDetail();closeWeldDefectDetail();}
@@ -73,6 +75,7 @@
     if(state.module==='vision'){$('#connectionBadge').textContent='视觉检具数据';$('#connectionBadge').classList.remove('connected','error');$('#loginButton').hidden=true;$('#sourceLink').hidden=true;}
     if(state.module==='tools'){$('#connectionBadge').textContent='本地工艺工具';$('#connectionBadge').classList.remove('connected','error');$('#loginButton').hidden=true;$('#sourceLink').hidden=true;}
     if(state.module==='penetration'){$('#connectionBadge').textContent='熔深统计数据';$('#connectionBadge').classList.remove('connected','error');$('#loginButton').hidden=true;$('#sourceLink').hidden=true;}
+    if(state.module==='settings'){$('#connectionBadge').textContent='门户设置';$('#connectionBadge').classList.remove('connected','error');$('#loginButton').hidden=true;$('#sourceLink').hidden=true;}
     renderPolling();
   }
   function invalidateStatusRequest(){state.authEpoch++;clearTimeout(state.statusTimer);state.statusTimer=null;const request=state.statusRequest;state.statusRequest=null;state.statusLoading=false;if(request)request.controller.abort();}
@@ -409,7 +412,8 @@
     document.body.classList.toggle('vision-mode',state.module==='vision');
     document.body.classList.toggle('tools-mode',state.module==='tools');
     document.body.classList.toggle('penetration-mode',state.module==='penetration');
-    const standalone=['spares','vision','tools','penetration'].includes(state.module);$$('.filter-panel,.metrics,.records-panel,#readStatus').forEach(node=>node.hidden=standalone);if($('#toolsWorkbench'))$('#toolsWorkbench').hidden=state.module!=='tools';if($('#penetrationWorkbench'))$('#penetrationWorkbench').hidden=state.module!=='penetration';if($('#qualityOverviewEntry'))$('#qualityOverviewEntry').hidden=state.module!=='weld';
+    document.body.classList.toggle('settings-mode',state.module==='settings');
+    const standalone=['spares','vision','tools','penetration','settings'].includes(state.module);$$('.filter-panel,.metrics,.records-panel,#readStatus').forEach(node=>node.hidden=standalone);if($('#toolsWorkbench'))$('#toolsWorkbench').hidden=state.module!=='tools';if($('#penetrationWorkbench'))$('#penetrationWorkbench').hidden=state.module!=='penetration';if($('#qualityOverviewEntry'))$('#qualityOverviewEntry').hidden=state.module!=='weld';
     if($('#companyWeekPicker'))$('#companyWeekPicker').hidden=!allowPolling();
     document.body.classList.toggle('alarm-mode',state.module==='alarm');if(state.module!=='alarm')closeAlarmDetail();if(state.module!=='weld')closeWeldDefectDetail();
     layoutAlarmFilters();
@@ -423,7 +427,7 @@
     $$('[data-view]').forEach(button=>{const active=button.dataset.view===state.view;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));});
     renderConnection();renderResult();
   }
-  function switchModule(){const id=location.hash.slice(1);if(!['','weld-live','alarm','spares','vision','tools','penetration'].includes(id)&&document.getElementById(id))return;const previousModule=state.module;saveQuerySettings();closeWeldDefectDetail();cancelRequest();clearTimer();state.module=['alarm','spares','vision','tools','penetration'].includes(id)?id:'weld';if(state.module==='weld'&&id!=='weld-live')history.replaceState(null,'','#weld-live');state.result=state.cache.get(cacheKey())||null;state.error='';restoreModuleQuery();closeNav();renderModule();if(previousModule!==state.module)window.scrollTo({top:0,left:0,behavior:'instant'});if(canRead())loadData('route');}
+  function switchModule(){const id=location.hash.slice(1);if(!['','weld-live','alarm','spares','vision','tools','penetration','settings'].includes(id)&&document.getElementById(id))return;const previousModule=state.module;saveQuerySettings();closeWeldDefectDetail();cancelRequest();clearTimer();state.module=['alarm','spares','vision','tools','penetration','settings'].includes(id)?id:'weld';if(state.module==='weld'&&id!=='weld-live')history.replaceState(null,'','#weld-live');state.result=state.cache.get(cacheKey())||null;state.error='';restoreModuleQuery();closeNav();renderModule();if(previousModule!==state.module)window.scrollTo({top:0,left:0,behavior:'instant'});if(canRead())loadData('route');}
   function renderCompanyWeek(day){
     if(!window.PortalCalendar||!$('#companyWeekYear'))return;
     let info;try{info=window.PortalCalendar.weekInfo(day||today());}catch(_){info=window.PortalCalendar.weekInfo(today());}

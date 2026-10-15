@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="vision.css?v=20261015">
   <link rel="stylesheet" href="tools.css?v=20261015">
   <link rel="stylesheet" href="penetration.css?v=20261016">
+  <link rel="stylesheet" href="settings.css?v=20261016">
   <link rel="stylesheet" href="portal-theme.css?v=20261015">
   <script src="vendor/jsQR.js" defer></script>
   <script src="vendor/qrcode.js" defer></script>
@@ -21,6 +22,7 @@
   <script src="portal-state.js?v=20261015" defer></script>
   <script src="tools.js?v=20261015" defer></script>
   <script src="penetration.js?v=20261016" defer></script>
+  <script src="settings.js?v=20261016" defer></script>
   <script src="app.js?v=20261015" defer></script>
 </head>
 <body class="logged-out">
@@ -42,6 +44,7 @@
     <nav><a class="nav-link active" href="#weld-live" data-route="weld-live"><span class="nav-symbol" aria-hidden="true">焊</span><span>补焊点<small>实时记录 · 日期查询 · 趋势</small></span></a><a class="nav-link" href="#alarm" data-route="alarm"><span class="nav-symbol" aria-hidden="true">灯</span><span>安灯报警<small>线体 · 部门 · 处理进度</small></span></a><a class="nav-link" href="#vision" data-route="vision"><span class="nav-symbol" aria-hidden="true">检</span><span>视觉检具<small>检测结果 · 测点明细</small></span></a><a class="nav-link" href="#penetration" data-route="penetration"><span class="nav-symbol" aria-hidden="true">熔</span><span>熔深合格率<small>公司周 · 月度 · 产品代号</small></span></a><a class="nav-link" href="#spares" data-route="spares"><span class="nav-symbol" aria-hidden="true">件</span><span>备件管理<small>扫码 · 入库 · 出库 · 盘点</small></span></a></nav>
     <p class="nav-caption nav-tools-caption">工艺工具</p>
     <nav aria-label="工艺工具"><a class="nav-link" href="#tools" data-route="tools"><span class="nav-symbol" aria-hidden="true">具</span><span>工具中心<small>焊接参数 · 检测对比</small></span></a></nav>
+    <nav class="nav-settings" aria-label="门户设置"><a class="nav-link" href="#settings" data-route="settings"><span class="nav-symbol" aria-hidden="true">设</span><span>设置<small>个人账号 · 成员权限</small></span></a></nav>
     <div class="sidebar-note"><strong>工艺业务 · 操作留痕</strong><p>公司业务数据与本地工具，统一工作入口。</p><span id="accountLabel">尚未登录</span></div>
   </aside>
   <button id="navBackdrop" class="nav-backdrop" aria-label="关闭导航" type="button" hidden></button>
@@ -51,6 +54,7 @@
       <div id="moduleNotice" class="notice info">这里显示焊接不合格日志。记录数不等于产品数，也不能据此确认已完成补焊。</div>
       <section id="qualityOverviewEntry" class="quality-overview-entry" aria-label="质量报表入口"><span class="quality-entry-mark" aria-hidden="true">熔</span><div><strong>熔深合格率</strong><p>按公司周、月份和产品代号查看检测统计。</p></div><a href="#penetration">进入报表 →</a></section>
       <section id="toolsWorkbench" aria-label="工艺工具中心" hidden></section>
+      <section id="settingsWorkbench" class="settings-workbench" aria-label="门户设置" hidden></section>
       <section id="penetrationWorkbench" class="penetration-workbench" aria-label="熔深合格率工作台" hidden></section>
       <div id="sourceStatusLine" class="source-status-line" role="status"><span class="source-status-dot" aria-hidden="true"></span><span id="sourceStatusText">正在检查数据源状态…</span></div>
       <section class="filter-panel" aria-label="查询条件">
