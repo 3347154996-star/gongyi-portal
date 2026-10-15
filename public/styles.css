@@ -153,3 +153,9 @@ body.logged-out{background:#eef3f9}.login-screen{display:flex;align-items:center
 /* Keep full material names readable without widening the mobile page. */
 #materialField{flex:2 1 360px;max-width:460px;min-width:0}#materialFilter{width:100%;min-width:0}
 @media(max-width:780px){#materialField{flex-basis:100%;max-width:none}}
+
+.login-initial-password{margin:0;padding:12px 14px;border:1px solid #d7e4f5;border-radius:8px;background:#f2f7fd;color:#294b75;font-size:13px;line-height:1.65;min-width:0}
+.login-initial-password[hidden]{display:none}
+.login-initial-password strong{display:block;font-weight:600}
+.login-initial-password code{font-family:Consolas,monospace;font-size:16px;font-weight:700;letter-spacing:.04em;overflow-wrap:anywhere;user-select:text}
+.login-initial-password p{margin:5px 0 0;color:#52657c}

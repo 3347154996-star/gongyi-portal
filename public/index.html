@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#2456a6">
   <title>工艺部业务门户</title>
-  <link rel="stylesheet" href="styles.css?v=20261013-materials">
+  <link rel="stylesheet" href="styles.css?v=20261015-login-help">
   <link rel="stylesheet" href="inventory.css?v=20261015">
   <link rel="stylesheet" href="vision.css?v=20261015">
   <link rel="stylesheet" href="tools.css?v=20261015">
@@ -23,13 +23,14 @@
   <script src="tools.js?v=20261015" defer></script>
   <script src="penetration.js?v=20261016" defer></script>
   <script src="settings.js?v=20261016" defer></script>
+  <script src="login-help.js?v=20261015" defer></script>
   <script src="app.js?v=20261015" defer></script>
 </head>
 <body class="logged-out">
   <section id="loginScreen" class="login-screen" aria-labelledby="loginTitle">
     <div class="login-composition">
       <div class="login-brand-panel"><a class="login-logo" href="#weld-live" aria-label="拓普工艺部业务门户"><img src="assets/tuopu-logo.png" alt="TUOPU 拓普" width="170" height="57"></a><div class="login-intro"><p class="login-kicker">PROCESS ENGINEERING</p><h1>工艺部业务门户</h1><p>业务记录、现场管理与工艺工具，<br>集中查看，协同处理。</p><div class="login-module-list"><div><span class="login-feature-icon weld-feature" aria-hidden="true">焊</span><span><strong>生产记录</strong><small>补焊点 · 安灯报警</small></span></div><div><span class="login-feature-icon alarm-feature" aria-hidden="true">灯</span><span><strong>现场业务</strong><small>视觉检具 · 备件管理</small></span></div><div><span class="login-feature-icon spare-feature" aria-hidden="true">件</span><span><strong>工艺工具</strong><small>焊接参数 · 检测对比</small></span></div></div></div><p class="login-brand-footer">TUOPU <span>工艺管理 · 业务协同</span></p></div>
-      <div class="login-form-panel"><form id="loginForm"><div class="dialog-heading"><div><p class="eyebrow">欢迎使用</p><h2 id="loginTitle">工号登录</h2></div></div><p class="dialog-note">登录门户，进入业务工作台。</p><label class="field"><span>工号</span><input id="usernameInput" name="username" type="text" autocomplete="username" placeholder="请输入工艺部工号" required></label><label class="field"><span>密码</span><input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required></label><p id="loginError" class="form-error" role="alert" hidden></p><button id="loginSubmit" class="button primary" type="submit">进入工作台 <span aria-hidden="true">→</span></button><p class="login-security">仅已登记的工艺部成员可登录。</p><div class="login-bottom-note"><span class="read-only-dot" aria-hidden="true"></span>工号登录 · 操作留痕</div></form></div>
+      <div class="login-form-panel"><form id="loginForm"><div class="dialog-heading"><div><p class="eyebrow">欢迎使用</p><h2 id="loginTitle">工号登录</h2></div></div><p class="dialog-note">登录门户，进入业务工作台。</p><label class="field"><span>工号</span><input id="usernameInput" name="username" type="text" autocomplete="username" placeholder="请输入工艺部工号" required></label><label class="field"><span>密码</span><input id="passwordInput" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required></label><aside id="loginInitialPasswordHint" class="login-initial-password" aria-label="新成员登录提示" hidden><strong>新成员初始密码：<code id="loginInitialPasswordValue"></code></strong><p>仅适用于本次新增成员，已改密账号请使用自己的密码。登录后可在“设置”中修改密码。</p></aside><p id="loginError" class="form-error" role="alert" hidden></p><button id="loginSubmit" class="button primary" type="submit">进入工作台 <span aria-hidden="true">→</span></button><p class="login-security">仅已登记的工艺部成员可登录。</p><div class="login-bottom-note"><span class="read-only-dot" aria-hidden="true"></span>工号登录 · 操作留痕</div></form></div>
     </div>
   </section>
   <div id="appShell" hidden>
