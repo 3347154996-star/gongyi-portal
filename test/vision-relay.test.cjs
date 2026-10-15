@@ -6,6 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
+const vm = require('node:vm');
 const { relayOnce, runWorker, requestStop, consumeStopRequest } = require('../lib/vision-relay.cjs');
 
 async function workspace(t) {
@@ -37,6 +38,32 @@ function safeError(files, code) {
     assert.ok(!error.message.includes('PRIVATE-SYNTHETIC-PAYLOAD'));
     return true;
   };
+}
+
+async function instrumentedRelay({ corruptTemporary = false } = {}) {
+  const filename = path.resolve(__dirname, '../lib/vision-relay.cjs');
+  const localRequire = require('node:module').createRequire(filename);
+  const originalValidator = localRequire('./vision.cjs').validateVisionSnapshot;
+  const metrics = { validatedBatches: [], wholeFileReads: [], chunkReadSizes: [], writes: 0 };
+  const io = { ...fs, open: async (name, ...args) => {
+    const handle = await fs.open(name, ...args);
+    return new Proxy(handle, { get(target, key) {
+      if (key === 'readFile') return async (...values) => { metrics.wholeFileReads.push(String(name)); return target.readFile(...values); };
+      if (key === 'read') return async (...values) => { metrics.chunkReadSizes.push(values[2]); return target.read(...values); };
+      if (key === 'writeFile') return async (...values) => {
+        metrics.writes++; const result = await target.writeFile(...values);
+        if (corruptTemporary && String(name).includes('.relay-')) await target.write(Buffer.from('!'), 0, 1, 0);
+        return result;
+      };
+      const value = target[key]; return typeof value === 'function' ? value.bind(target) : value;
+    } });
+  } };
+  const module = { exports: {} };
+  vm.runInNewContext(await fs.readFile(filename, 'utf8'), { module, Buffer, TextDecoder, process, setTimeout, clearTimeout,
+    require: name => name === 'node:fs/promises' ? io : name === './vision.cjs' ? {
+      validateVisionSnapshot: (raw, options) => { metrics.validatedBatches.push(raw.records?.length); return originalValidator(raw, options); }
+    } : localRequire(name) }, { filename });
+  return { relayOnce: module.exports.relayOnce, metrics };
 }
 
 test('relay copies validated source bytes exactly without changing records or collector scan time', async t => {
@@ -80,6 +107,66 @@ test('identical source bytes return unchanged without touching destination mtime
   assert.equal(second.sha256, first.sha256);
   assert.equal((await fs.stat(files.destinationFile)).mtimeMs, before.mtimeMs);
   assert.deepEqual(await fs.readFile(files.destinationFile), bytes);
+});
+
+test('identical bytes are fully validated once and do not allocate or validate a second record collection', async t => {
+  const files = await workspace(t), bytes = bytesOf(snapshot({ records: [record()] }));
+  await fs.writeFile(files.sourceFile, bytes); await fs.writeFile(files.destinationFile, bytes);
+  const relay = await instrumentedRelay();
+  assert.equal((await relay.relayOnce(files)).state, 'unchanged');
+  assert.deepEqual(relay.metrics.validatedBatches, [1]);
+  assert.deepEqual(relay.metrics.wholeFileReads, [files.sourceFile, files.destinationFile]);
+  assert.equal(relay.metrics.writes, 0);
+});
+
+test('equal sizes and timestamps never allow different source content to skip validation or rollback protection', async t => {
+  const files = await workspace(t), source = bytesOf(snapshot({ scannedAt: '2026-10-14T08:00:00Z', records: [record()] }));
+  const destination = bytesOf(snapshot({ scannedAt: '2026-10-15T08:00:00Z', records: [record()] }));
+  assert.equal(source.length, destination.length);
+  await fs.writeFile(files.sourceFile, source); await fs.writeFile(files.destinationFile, destination);
+  const time = new Date('2026-10-15T08:00:00Z');
+  await fs.utimes(files.sourceFile, time, time); await fs.utimes(files.destinationFile, time, time);
+  const relay = await instrumentedRelay();
+  await assert.rejects(relay.relayOnce(files), { code: 'VISION_RELAY_ROLLBACK' });
+  assert.deepEqual(relay.metrics.validatedBatches, [1, 1]);
+  assert.deepEqual(await fs.readFile(files.destinationFile), destination);
+});
+
+test('identical invalid bytes, an invalid last record and the complete-batch record limit are still rejected', async t => {
+  const files = await workspace(t);
+  const invalid = [snapshot({ records: [{}] }), snapshot({ records: [record(), { ...record(), measurements: [] }] }), snapshot({ records: Array.from({ length: 20001 }, () => ({})) })];
+  for (const document of invalid) {
+    const bytes = bytesOf(document); await fs.writeFile(files.sourceFile, bytes); await fs.writeFile(files.destinationFile, bytes);
+    const relay = await instrumentedRelay();
+    await assert.rejects(relay.relayOnce(files), { code: 'VISION_RELAY_FORMAT' });
+    assert.deepEqual(relay.metrics.wholeFileReads, [files.sourceFile], 'Invalid source cannot use byte equality to bypass validation');
+    assert.equal(relay.metrics.writes, 0); assert.deepEqual(await fs.readFile(files.destinationFile), bytes);
+  }
+});
+
+test('a newer target with invalid measurement data is repaired only after full target validation', async t => {
+  const files = await workspace(t), source = bytesOf(snapshot({ scannedAt: '2026-10-14T08:00:00Z', records: [record()] }));
+  const broken = record(); broken.measurements[60].nominal = 'invalid';
+  await fs.writeFile(files.sourceFile, source); await fs.writeFile(files.destinationFile, bytesOf(snapshot({ scannedAt: '2026-10-15T08:00:00Z', records: [broken] })));
+  const relay = await instrumentedRelay(), result = await relay.relayOnce(files);
+  assert.equal(result.state, 'copied'); assert.equal(result.replacedInvalidTarget, true);
+  assert.deepEqual(relay.metrics.validatedBatches, [1, 1]); assert.deepEqual(await fs.readFile(files.destinationFile), source);
+});
+
+test('temporary-copy verification reads bounded chunks and detects corruption before replacing the destination', async t => {
+  const files = await workspace(t), document = snapshot({ records: [record()] });
+  document.synthetic_padding = 'x'.repeat(200000); const bytes = bytesOf(document);
+  await fs.writeFile(files.sourceFile, bytes);
+  const relay = await instrumentedRelay(); assert.equal((await relay.relayOnce(files)).state, 'copied');
+  assert.deepEqual(relay.metrics.wholeFileReads, [files.sourceFile]);
+  assert.ok(relay.metrics.chunkReadSizes.length > 3); assert.ok(relay.metrics.chunkReadSizes.every(size => size <= 64 * 1024));
+  assert.deepEqual(await fs.readFile(files.destinationFile), bytes);
+  const originalTarget = bytesOf(snapshot({ scannedAt: document.last_scan.scanned_at_utc })); await fs.writeFile(files.destinationFile, originalTarget);
+  const corrupt = await instrumentedRelay({ corruptTemporary: true });
+  await assert.rejects(corrupt.relayOnce(files), { code: 'VISION_RELAY_VERIFY' });
+  assert.deepEqual(await fs.readFile(files.destinationFile), originalTarget);
+  assert.deepEqual(await fs.readFile(files.sourceFile), bytes);
+  assert.equal((await fs.readdir(files.root)).some(name => name.includes('.relay-')), false);
 });
 
 test('malformed UTF-8, JSON, schema and records never replace a valid destination', async t => {

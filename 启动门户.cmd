@@ -1,19 +1,25 @@
 @echo off
+setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
-if exist "%~dp0portable-node\node.exe" (
-  echo 正在使用随包附带的 Node.js 启动门户，请保持本窗口打开。
-  "%~dp0portable-node\node.exe" "%~dp0server.cjs"
-  pause
-  exit /b
-)
-where node >nul 2>nul
-if errorlevel 1 (
-  echo 请先安装 Node.js 22 或更新版本，然后重新启动。
-  pause
-  exit /b 1
-)
-echo 正在启动工艺部门户，请保持本窗口打开。
-echo 浏览器访问地址以启动后显示的地址为准。
-node server.cjs
+if not exist "server.cjs" goto missing_files
+if exist "portable-node\node.exe" goto bundled
+where node.exe >nul 2>nul
+if errorlevel 1 goto missing_node
+node.exe "%~dp0server.cjs"
+goto finished
+:bundled
+"%~dp0portable-node\node.exe" "%~dp0server.cjs"
+:finished
+set "PORTAL_EXIT=%ERRORLEVEL%"
+if not "%PORTAL_EXIT%"=="0" echo Startup failed. Run startup-diagnostics.cmd and share its log.
 pause
+exit /b %PORTAL_EXIT%
+:missing_files
+echo Missing server.cjs. Extract the complete ZIP to a local folder first.
+pause
+exit /b 2
+:missing_node
+echo Node.js 22 or newer is required. Restore portable-node or install official Node.js.
+pause
+exit /b 3

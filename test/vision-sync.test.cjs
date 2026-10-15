@@ -49,6 +49,17 @@ test('snapshot validation is pure, returns normalized records and validates the 
   assert.throws(() => validateVisionSnapshot({ schema_version: 2, records: [] }), /版本/);
 });
 
+test('validation-only mode validates every measurement without returning retained records', () => {
+  const raw = snapshot(record(), record('SYNTHETIC-VALIDATION-ONLY'));
+  const before = structuredClone(raw);
+  assert.equal(validateVisionSnapshot(raw, { retainRecords: false }), 2);
+  assert.deepEqual(raw, before);
+  assert.equal(validateVisionSnapshot(snapshot(), { retainRecords: false }), 0);
+  const invalid = structuredClone(raw); invalid.records[1].measurements[60].deviationRaw = '0.2';
+  assert.throws(() => validateVisionSnapshot(invalid, { retainRecords: false }), /原始偏差与数值/);
+  assert.throws(() => validateVisionSnapshot({ schema_version: 2, records: [] }, { retainRecords: false }), /版本/);
+});
+
 test('start persists inspections without any page query and stop leaves the snapshot readable', async t => {
   let reads = 0;
   const { service, store } = await setup(t, { sourceReader: { async read() { reads++; return snapshot(record()); } } });
@@ -224,4 +235,65 @@ test('a service never started retains query-triggered awaited synchronization', 
   assert.equal(settled, false);
   pending.resolve(snapshot(record()));
   assert.equal((await query).total, 1);
+});
+
+test('unchanged filesystem input keeps statistics and persistence stable but still ages and recovers', async t => {
+  let clock = now();
+  const { service, root, store } = await setup(t, { now: () => clock });
+  const input = path.join(root, 'runtime/vision-input.json');
+  await fs.mkdir(path.dirname(input), { recursive: true });
+  const original = JSON.stringify(snapshot(record()));
+  await fs.writeFile(input, original);
+  await service.start();
+  const first = await service.report(), saved = await fs.readFile(store, 'utf8');
+  const stamp = new Date('2020-01-01T00:00:00Z'); await fs.utimes(store, stamp, stamp);
+  clock += 7201000;
+  await service.sync();
+  const aged = await service.report();
+  assert.deepEqual(aged.summary, first.summary);
+  assert.deepEqual(aged.records, first.records);
+  assert.equal(aged.source.state, 'waiting');
+  assert.equal(await fs.readFile(store, 'utf8'), saved);
+  assert.equal((await fs.stat(store)).mtimeMs, stamp.getTime());
+  await fs.writeFile(input, '{invalid'); await service.sync();
+  assert.equal((await service.report()).source.state, 'error');
+  await fs.writeFile(input, original); await service.sync();
+  assert.equal((await service.report()).source.state, 'waiting');
+  const fresh = snapshot(record()); fresh.last_scan.scanned_at_utc = new Date(clock).toISOString();
+  await fs.writeFile(input, JSON.stringify(fresh)); await service.sync();
+  assert.equal((await service.report()).source.state, 'ready');
+  assert.deepEqual((await service.report()).summary, first.summary);
+});
+
+test('change tokens advance only after the complete incoming batch commits', async t => {
+  const validToken = 'a'.repeat(64), invalidToken = 'b'.repeat(64), recoveredToken = 'c'.repeat(64);
+  let calls = 0; const seen = [];
+  const { service, store } = await setup(t, { sourceReader: { async readIfChanged(prior) {
+    seen.push(prior); calls++;
+    if (calls === 1) return { digest: validToken, unchanged: false, document: snapshot(record()) };
+    if (calls === 2) return { digest: invalidToken, unchanged: false, document: snapshot({ ...record('INVALID'), measurements: [] }) };
+    if (calls === 3) return { digest: validToken, unchanged: true };
+    return { digest: recoveredToken, unchanged: false, document: snapshot(record('RECOVERED')) };
+  } } });
+  await service.start(); const before = await fs.readFile(store, 'utf8');
+  await service.sync(); assert.equal((await service.report()).source.state, 'error');
+  assert.equal(await fs.readFile(store, 'utf8'), before);
+  await service.sync(); assert.equal((await service.report()).source.state, 'ready');
+  await service.sync(); assert.equal((await service.report()).total, 2);
+  assert.deepEqual(seen, [null, validToken, validToken, validToken]);
+});
+
+test('stopping during a change-aware read cannot publish its token into the next generation', async t => {
+  const pending = gate(), called = gate(), oldToken = 'd'.repeat(64), newToken = 'e'.repeat(64);
+  const seen = []; let reads = 0;
+  const { service, store } = await setup(t, { sourceReader: { readIfChanged(prior) {
+    seen.push(prior); reads++;
+    if (reads === 1) { called.resolve(); return pending.promise; }
+    return Promise.resolve({ digest: newToken, unchanged: false, document: snapshot(record('CURRENT-GENERATION')) });
+  } } });
+  const first = service.start(); await called.promise; service.stop(); const next = service.start();
+  pending.resolve({ digest: oldToken, unchanged: false, document: snapshot(record('OBSOLETE-GENERATION')) });
+  await Promise.all([first, next]);
+  assert.deepEqual(seen, [null, null]);
+  assert.deepEqual(JSON.parse(await fs.readFile(store, 'utf8')).records.map(row => row.serialNumber), ['CURRENT-GENERATION']);
 });
