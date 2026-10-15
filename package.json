@@ -3,6 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "description": "工艺部本地业务门户",
-  "scripts": { "start": "node server.cjs", "setup": "node setup-admin.cjs", "test": "node --test test/*.test.cjs" },
+  "scripts": { "start": "node server.cjs", "setup": "node setup-admin.cjs", "vision:check": "node check-vision-connection.cjs", "test": "node --test test/*.test.cjs" },
   "engines": { "node": ">=22" }
 }

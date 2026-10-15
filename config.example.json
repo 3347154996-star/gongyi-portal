@@ -5,7 +5,9 @@
   "port": 4173,
   "vision": {
     "dataFile": "runtime/vision-input.json",
-    "maxScanAgeSeconds": 7200
+    "maxScanAgeSeconds": 7200,
+    "pollIntervalSeconds": 30,
+    "readTimeoutMs": 10000
   },
   "maxPages": 50,
   "language": "0",

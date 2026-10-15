@@ -22,7 +22,7 @@
   <header class="topbar"><div class="topbar-inner"><span class="brand">工艺部业务门户 · 接入指南</span><button class="print-button" id="printGuide" type="button">打印 / 保存为 PDF</button></div></header>
   <main id="main">
     <header class="hero">
-      <p class="eyebrow">现场负责人 · 门户管理员 · 维护人员 · 生产网络 IT ｜ 2026-10-14</p>
+      <p class="eyebrow">现场负责人 · 门户管理员 · 维护人员 · 生产网络 IT ｜ 2026-10-15</p>
       <h1>其他检具接入流程</h1>
       <p class="lead">先收集资料与登记，再由维护人员适配。单台在最终服务器上验证通过后，分批接入其他检具。</p>
       <div class="notice"><strong>登记不等于接通</strong>“登记检具”保存的是待配置台账。卡片出现后，不会自动创建采集程序、读取新共享或产生检测结果；待配置设备没有虚构数据。</div>
@@ -31,10 +31,11 @@
     <section id="deployment" aria-labelledby="deploymentTitle">
       <h2 id="deploymentTitle">部署后，现有连接方式还能用吗？</h2>
       <div class="layout">
-        <article class="card"><span class="tag">厂内 Windows 部署</span><h3>满足网络和权限条件，可继续读共享</h3><p>检具持续生成采集结果，由最终门户服务器读取授权的只读共享。手机和浏览器通过网页查看，无需直接连接 SMB。</p><ul><li>验证最终服务器到检具的网络路径。</li><li>确认实际运行门户服务的账号能读取文件。</li><li>验收重启后的采集、认证和服务恢复。</li></ul></article>
-        <article class="card"><span class="tag pending">公网云 / 生产网络之外</span><h3>需要另做上传或 IT 专用网络</h3><p>云服务器不能直接访问厂内私有地址共享。可由维护人员开发 HTTPS 主动上传，或由 IT 提供受控专用网络。</p><ul><li>上传需要设备鉴权、断线重试和去重。</li><li><strong>上传链路当前尚未实现。</strong></li><li>不要把 SMB 的 445 端口直接开放到公网。</li></ul></article>
+        <article class="card"><span class="tag">厂内 Windows 部署</span><h3>授权服务身份，使用 UNC 读取共享</h3><p>检具持续生成采集结果，由最终门户服务器读取授权的只读共享。本机和以后厂内部署保留同一文件接入方式。</p><ul><li>验证服务器到检具的网络路径。</li><li>授权实际门户服务账号的共享及文件读取权限，不依赖个人会话的映射盘符。</li><li>验收重启后的采集、认证和服务恢复。</li></ul></article>
+        <article class="card"><span class="tag">厂内 Linux / 容器部署</span><h3>由 IT 只读挂载，再配置绝对路径</h3><p>保留 SMB 共享，由 IT 受控挂载为只读目录，门户通过本地挂载路径读取。无需因此更新现场 EXE。</p><ul><li>不能直接把 Windows UNC 粘成 Linux 路径。</li><li>核对进程或容器读取权限与重启后的挂载恢复。</li><li>认证由操作系统管理，路径中不填写凭据。</li></ul></article>
       </div>
-      <p class="caption" style="margin-top:12px">部署形式尚未确定。本指南不预设迁移方案；原电脑能读到，不代表换服务器后也能读到。</p>
+      <p class="caption" style="margin-top:12px">共享传输与网页访问是两层：服务器读采集文件，浏览器和手机只访问门户 HTTPS，无需连接 SMB 或保存共享密码。原电脑能读到不代表新服务器可读，最终主机仍需验收。当前没有主动上传功能。</p>
+      <p class="caption">系统依据：<a href="https://learn.microsoft.com/en-us/windows/win32/services/services-and-redirected-drives">Microsoft：Windows 服务与映射盘符</a>、<a href="https://manpages.ubuntu.com/manpages/noble/man8/mount.cifs.8.html">Ubuntu：mount.cifs 只读挂载</a>。</p>
     </section>
 
     <nav class="anchor-nav" aria-label="指南目录"><a href="#migration">换服务器怎么办</a><a href="#scope">当前能力</a><a href="#steps">七步接入</a><a href="#acceptance">单台验收</a><a href="#worksheet">填写信息表</a><a href="#limits">前提与局限</a></nav>
@@ -42,7 +43,7 @@
     <section id="migration" aria-labelledby="migrationTitle">
       <h2 id="migrationTitle">如果放到厂内服务器，需要重新配置什么？</h2>
       <p class="section-intro">换服务器需部署和验收服务器这一侧。<strong>共享读取方式、检具输出和共享路径都不变时，检具端采集程序通常不用改。</strong>由服务器主动读共享，服务器地址变化不要求检具向新地址发送数据；同事通过新的网页地址访问。</p>
-      <div class="checks"><h3>由维护人员与 IT 执行的迁移清单</h3><p class="caption">部署地点尚未确定，以下是条件与交付要求，当前未实施这些操作。</p><ul class="checklist"><li>在新服务器部署门户程序、运行环境，确定实际服务账号。</li><li>在维护时段停止原门户写入并备份；目标已有数据时也先停止相关服务并备份。迁移已保存的 <code>runtime</code> 业务数据，核对数量、登记和配置，避免空目录或默认文件覆盖已有数据。</li><li>保留原检具设备编号和来源归属，现有 <code>vision-01</code> 继续使用。</li><li>共享位置未变时可沿用同一路径，但须在新服务器、实际服务账号下重新验证网络、共享及文件权限。</li><li>共享凭据不会随代码自动迁移。由 IT 在新服务器本机配置，密码由授权人员自己填写，不放进文档或聊天。</li><li>配置并验证开机启动、重启后的认证和读取，确认检具原有持续采集正常。</li><li>按用户访问范围配置网页监听、限定的防火墙规则及 HTTPS，从同事的电脑或手机实际访问验收。</li><li>比对历史记录、设备归属、最新检测和页面状态，通过后再切换网页地址，保留可恢复备份。</li></ul></div>
+      <div class="checks"><h3>由维护人员与 IT 执行的迁移清单</h3><p class="caption">以下为部署与交付要求，不代表已在最终服务器实施。</p><ul class="checklist"><li>在新服务器部署门户程序、运行环境，确定实际服务账号。</li><li>在维护时段停止原门户写入并备份；目标已有数据时也先停写备份。迁移 <code>runtime</code> 历史记录、检具台账及其他业务数据，核对数量、登记和配置，避免空目录覆盖已有数据。</li><li>保留设备编号和来源归属，现有 <code>vision-01</code> 继续使用。</li><li>Windows 使用 UNC；Linux 或容器先只读挂载，再配置绝对路径。确认环境变量没有覆盖错来源。</li><li>共享凭据不会随代码迁移，由 IT 在系统中受控配置，不放进文档、聊天或路径。</li><li>以实际门户服务身份和相同配置环境运行 <code>npm run vision:check</code>，验证连接及输入格式。</li><li>配置并验证开机启动、重启后的挂载认证和读取，确认检具持续采集正常。</li><li>验证无人查看时仍同步；在受控环境验收读取超时、旧记录可查询、错误提示及恢复。</li><li>配置网页监听、限定的防火墙规则及 HTTPS，从同事电脑或手机实际访问验收。</li><li>保留现场 SQLite 与原 CSV，核对停机是否造成超出两天快照的缺口，另行安排受控补接。</li><li>比对历史记录、设备归属、最新检测和页面状态，通过后再切换网页地址，保留可恢复备份。</li></ul></div>
       <div class="notice"><strong>如果只是让同事访问当前电脑</strong>不需要因此重配检具采集。维护人员需单独处理网页监听、访问范围、防火墙和 HTTPS，并从其他电脑验收。当前服务仅监听本机回环地址，只能确认本机可用，尚不能宣称已在局域网开放。</div>
     </section>
 
@@ -54,8 +55,9 @@
         <article class="status-item"><span class="status-label pending">新设备需单独配置</span><h3>现有 v2 包不能直接复制给多台</h3><p>现有免安装包固定使用 <code>vision-01</code>，编号保留给现有检具。新设备需唯一编号及专用配置包，不能只改 IP。</p></article>
         <article class="status-item"><span class="status-label pending">尚未实现</span><h3>多来源、新格式与主动上传</h3><p>当前仅有一个 <code>dataFile</code> 自动读取入口；多来源汇集、其他型号与测点结构的通用解析，以及 HTTPS 上传仍需开发验证。</p></article>
       </div>
+      <div class="checks"><h3>统一文件源与同步设置</h3><ul><li><code>PORTAL_VISION_DATA_FILE</code>：非空时优先的文件路径环境变量，只填路径，不填凭据。</li><li><code>vision.dataFile</code>：兼容原私有配置，无环境变量覆盖时继续使用；无覆盖时默认 <code>runtime/vision-input.json</code>。</li><li><code>vision.pollIntervalSeconds</code>：后台同步间隔默认 30 秒，允许 5–3600 秒。</li><li><code>vision.readTimeoutMs</code>：读取超时默认 10000 毫秒，允许 1000–60000 毫秒。</li></ul><p>门户运行期间无需有人查看即可同步，页面读取缓存；同一服务实例的同步不重叠。读取超时、损坏或校验失败时保留旧记录并提示异常。以上设置不改变现场 v2 的采集间隔和输出窗口。</p><p>读取期限不能取消底层 SMB 调用：超时后保留同一在途读取防止堆积，底层返回后后续轮次才能继续；持续不返回时需恢复系统连接，必要时重启门户后核对，不保证所有断网都自动恢复。</p><p>在最终服务器门户目录，以实际服务身份和相同配置环境运行 <code>npm run vision:check</code>。自检只读连接和格式，不写真实业务数据，不打印检测记录、源路径或凭据；不能据此证明历史完整或重启恢复通过。</p></div>
       <div class="notice"><strong>范围与容量一起确认</strong>只采集普通 <code>backup</code>，排除 <code>_ALLmeasure</code> 与 <code>failure</code>；结果写到独立的 <code>data/vision.json</code>。当前单批输入及门户已存记录最多 20,000 条，输入及存储文件最多 128 MB，两类上限同时适用，不是每台各有一份容量。</div>
-      <p class="section-intro">文件有效、无采集错误且仍可读，但扫描时间超过默认 2 小时，页面显示“共享可读取，等待采集更新”，继续提供查询和自动刷新。读取失败、内容损坏或采集报错仍显示真实异常；等待提示不能证明采集仍在运行。</p>
+      <p class="section-intro">文件有效、无采集错误且仍可读，但扫描时间超过默认 2 小时，页面显示“共享可读取，等待采集更新”，继续提供查询和自动刷新。该宽限由 <code>vision.maxScanAgeSeconds</code> 单独控制，不是同步间隔或读取超时。读取失败、内容损坏或采集报错仍显示真实异常；等待提示不能证明采集仍在运行。</p>
     </section>
 
     <section id="steps" aria-labelledby="stepsTitle">
@@ -64,8 +66,8 @@
         <li class="step"><span class="number" aria-hidden="true">1</span><div><p class="owner">现场负责人</p><h3>收集设备资料和真实样例</h3><ul><li>列出线体、检具名称、型号、台数，一台填一张信息表。</li><li>确认结果软件、普通 backup 路径、日期目录及文件名结构；相机图像和点云不能代替检测结果。</li><li>准备正常与实际 NG 样例；有缺测、复检等情况时，补对应真实样例。没有的情况标“待补样”，不编造。</li><li>将设备地址、网络区域和现场、IT 联系人交给授权维护人员。</li></ul><p class="deliverable">交付：设备资料表、实际样例和待确认事项。</p></div></li>
         <li class="step"><span class="number" aria-hidden="true">2</span><div><p class="owner">门户管理员</p><h3>登记检具，分配唯一设备编号</h3><p>在“视觉检具 → 登记检具”填写线体名、检具名、编号、共享或上传方式、路径、型号、测点数及备注。路径不确定时标为待维护确认，选择上传只代表计划。</p><ul><li><code>vision-01</code> 保留给现有检具；新设备使用新编号。</li><li>一机一号，后续升级或改 IP 保持原编号。</li><li>不要在任何登记字段中填写密码。</li></ul><p class="deliverable">交付：待配置台账。出现卡片或选择项不表示已经接通。</p></div></li>
         <li class="step"><span class="number" aria-hidden="true">3</span><div><p class="owner">维护人员，必要时联系供应商</p><h3>验证数据格式，生成设备专用配置包</h3><p>核对实际型号、测点数量和名称、SN、时间、数值、缺测写法与整体、逐项判定。单位或判定规则不清楚时先查证。</p><p>每台包绑定自己的编号、源目录和输出目录。其他型号不能套用现有 61 项规则；现有 v2 包也不能直接复制用于多机。</p><p>新增第二个自动来源前，需先完成多来源读取或汇集；用新路径覆盖现有 <code>dataFile</code> 并不等于同时接入两台。</p><p class="deliverable">交付：已验证样例、专用采集包及服务端接入方案；未适配设备保持待配置。</p></div></li>
-        <li class="step"><span class="number" aria-hidden="true">4</span><div><p class="owner">现场人员与生产网络 IT</p><h3>持续采集，只共享独立结果目录</h3><p>按专用包说明先采集一次，再启动持续采集并保持运行。输出目录位于源 backup 之外，由程序生成 <code>data/vision.json</code>；只共享结果文件夹。</p><p>IT 核对共享和文件权限，必要时建立专用非管理员读取账号。密码由用户在 Windows 中自行输入，不发聊天，不写进脚本或页面。检具生产程序原有写入权限需保留。</p><p>跨网段访问由 IT 核对；同一 Wi-Fi 不保证可达。现有 v2 默认输出今天和昨天，补历史需另行规划容量。</p><p class="deliverable">交付：更新中的输出文件、授权读取方式和运行负责人。</p></div></li>
-        <li class="step"><span class="number" aria-hidden="true">5</span><div><p class="owner">维护人员与生产网络 IT</p><h3>在最终部署服务器上验证</h3><p>使用门户服务实际运行的身份读取共享，核对文件更新、扫描时间和错误状态。个人电脑能打开文件夹，不代表服务账号可读。</p><p>厂内 Windows 由服务器读共享、浏览器看网页；云部署先完成上传或专用网络方案，当前没有现成上传开关可启用。</p><p class="caption">路径仅作占位示意：<code>\\&lt;检具主机名或地址&gt;\&lt;采集结果共享名&gt;\vision.json</code>，不能照抄。</p><p class="deliverable">交付：最终服务器、最终服务账号下通过的读取或接收记录。</p></div></li>
+        <li class="step"><span class="number" aria-hidden="true">4</span><div><p class="owner">现场人员与生产网络 IT</p><h3>持续采集，只共享独立结果目录</h3><p>按专用包说明先采集一次，再启动持续采集并保持运行。输出目录位于源 backup 之外，由程序生成 <code>data/vision.json</code>；只共享结果文件夹。</p><p>IT 核对共享、文件和挂载权限，必要时建立专用非管理员读取账号。凭据在操作系统中受控管理，不发聊天，不写进脚本或页面。保留检具生产程序原有写入权限。</p><p>跨网段访问由 IT 核对；同一 Wi-Fi 不保证可达。现有 v2 默认输出今天和昨天，补历史需另行规划容量。</p><p class="deliverable">交付：更新中的输出文件、授权读取方式和运行负责人。</p></div></li>
+        <li class="step"><span class="number" aria-hidden="true">5</span><div><p class="owner">维护人员与生产网络 IT</p><h3>在最终部署服务器上验证</h3><p>以实际门户服务身份和相同配置环境运行 <code>npm run vision:check</code>，核对文件更新、扫描时间和错误状态。个人电脑能打开文件夹，不代表服务账号可读。</p><p>Windows 配置 UNC；Linux 或容器先由 IT 只读挂载，再使用绝对路径。浏览器和手机只访问门户 HTTPS。核对环境变量覆盖，并验证无人查看时同步及超时后的恢复。</p><p class="caption">占位示意：Windows <code>\\&lt;检具主机名或地址&gt;\&lt;采集结果共享名&gt;\vision.json</code>；Linux 挂载后 <code>/mnt/vision-01/vision.json</code>。按实机填写，不能照抄或携带凭据。</p><p class="deliverable">交付：最终服务器、最终服务账号下通过的读取与后台同步记录。</p></div></li>
         <li class="step"><span class="number" aria-hidden="true">6</span><div><p class="owner">现场负责人和维护人员</p><h3>先验收一台，包含重启恢复</h3><p>按下方验收表比对原软件与网页，并检查新检测更新、复检去重、来源不串数据。维护时段内验证检具与门户服务器重启后的采集、网络、认证和服务恢复。</p><p>缺少某类实际样例时记录“待验证”；没有做过重启测试时，不宣称可无人值守长期运行。</p><p class="deliverable">交付：有日期、责任人及未完成项的单台验收记录。</p></div></li>
         <li class="step"><span class="number" aria-hidden="true">7</span><div><p class="owner">门户管理员，现场与维护人员共同确认</p><h3>分批启用其他检具</h3><p>单台验收通过、多来源能力完成后，再按线体分批启用。每台保留唯一编号、专用配置和验收记录；每批复核来源、最近更新和整体容量。</p><p class="deliverable">交付：逐台确认的接入清单。未完成适配的设备继续待配置。</p></div></li>
       </ol>
@@ -73,7 +75,7 @@
 
     <section id="acceptance" aria-labelledby="acceptanceTitle">
       <h2 id="acceptanceTitle">单台验收清单</h2>
-      <div class="checks"><ul class="checklist"><li>同一 SN 的时间、整体 OK/NG、测点名称、数量和关键数值与原软件一致。</li><li>逐项 NG 与整体判定分别保留，测点合格率不替代零件合格率。</li><li>重复文件不重复计数，同 SN 不同时间的复检可区分。</li><li>切换线体、检具后来源正确，多台同 SN 不会串数据。</li><li>新增实际检测后，采集输出、扫描时间、网页记录依次更新。</li><li>采集暂停或共享不可读时显示相应等待或异常，旧数据不被当作最新。</li><li>已在维护时段验证两端重启后的采集、网络、认证与服务恢复。</li><li>无实际样例的 NG、缺测等情况标为待验证；容量、历史保留和联系人已确认。</li></ul></div>
+      <div class="checks"><ul class="checklist"><li>同一 SN 的时间、整体 OK/NG、测点名称、数量和关键数值与原软件一致。</li><li>逐项 NG 与整体判定分别保留，测点合格率不替代零件合格率。</li><li>重复文件不重复计数，同 SN 不同时间的复检可区分。</li><li>切换线体、检具后来源正确，多台同 SN 不会串数据。</li><li>新增实际检测后，采集输出、扫描时间、网页记录依次更新。</li><li>无人查看时后台仍同步；受控环境下读取超时后旧记录可查询、错误状态准确，同步任务不重叠且可恢复。</li><li>采集暂停或共享不可读时显示相应等待或异常，旧数据不被当作最新。</li><li>已在维护时段验证两端重启后的采集、网络、认证与服务恢复。</li><li>无实际样例的 NG、缺测等情况标为待验证；容量、历史保留和联系人已确认。</li><li>核对两天快照窗口外的历史缺口，保留现场 SQLite 并安排受控补接。</li></ul></div>
     </section>
 
     <section id="worksheet" aria-labelledby="worksheetTitle">
@@ -92,7 +94,7 @@
         <div class="field"><span class="field-label" id="fieldAddress">检具地址 / 生产网络区域</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldAddress" data-placeholder="仅交给授权维护人员"></div></div>
         <div class="field"><span class="field-label" id="fieldMode">接入意向：共享 / 上传 / 待确认</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldMode" data-placeholder="上传功能当前未实现"></div></div>
         <div class="field full"><span class="field-label" id="fieldOutput">独立输出目录 / 结果共享路径</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldOutput" data-placeholder="未确定时写待维护确认"></div></div>
-        <div class="field"><span class="field-label" id="fieldServer">最终服务器位置及部署形式</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldServer" data-placeholder="厂内 Windows / 云端 / 待定"></div></div>
+        <div class="field"><span class="field-label" id="fieldServer">最终服务器位置及部署形式</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldServer" data-placeholder="厂内 Windows / Linux / 容器 / 待定"></div></div>
         <div class="field"><span class="field-label" id="fieldPermission">读取权限负责人（不填密码）</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldPermission" data-placeholder="填写负责人"></div></div>
         <div class="field"><span class="field-label" id="fieldPeople">现场联系人 / 生产网络 IT 联系人</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldPeople" data-placeholder="按公司要求填写"></div></div>
         <div class="field"><span class="field-label" id="fieldMaintainer">维护人员 / 采集包版本</span><div class="entry" contenteditable="true" role="textbox" aria-labelledby="fieldMaintainer" data-placeholder="点击填写"></div></div>
@@ -101,7 +103,7 @@
       </div></div>
     </section>
 
-    <section class="limits" id="limits" aria-labelledby="limitsTitle"><h2 id="limitsTitle">前提条件与局限性</h2><p>本流程以获得授权、提供实际检测结果样例，以及现场、维护人员和 IT 能够配合为前提。已适配的前副车架接入不代表任意品牌、型号或台数都能直接使用。登记不会突破当前单来源、格式及容量限制。</p><p>部署形式确定后，需在最终环境重新验收。本指南是接入分工与交付说明，不代表已完成其他设备的数据连接、多来源接口、上传接口或开机自动启动。</p></section>
+    <section class="limits" id="limits" aria-labelledby="limitsTitle"><h2 id="limitsTitle">前提条件与局限性</h2><p>本流程以获得授权、提供实际检测结果样例，以及现场、维护人员和 IT 能够配合为前提。已适配的前副车架接入不代表任意品牌、型号或台数都能直接使用。登记不会突破当前单来源、格式及容量限制。</p><p>后台同步不能自动补齐门户停机或共享中断期间的历史。超过 v2 今天、昨天的快照窗口可能漏接，短于两天也需核对跨日边界。迁移必须带上原 <code>runtime</code> 历史记录和台账，保留现场 <code>data/vision.sqlite</code> 与原 CSV；补接由维护人员结合 20,000 条、128 MB 上限受控安排，当前不自动从 SQLite 回补或归档扩容。</p><p>部署形式确定后，需在最终环境重新验收。本指南不代表已配置网络、安装服务或完成其他设备接入；多来源、上传及实际开机启动部署仍需另行实施，现场 EXE 不因本次统一文件源而更改。</p></section>
     <footer class="footer">工艺部业务门户 · 其他检具接入指南 ｜ 本页可独立打开和打印，不发送或保存填写内容。<span class="screen-only"> 浏览器也可使用“打印”功能保存为 PDF。</span></footer>
   </main>
   <script>document.getElementById('printGuide').addEventListener('click', function () { window.print(); });</script>

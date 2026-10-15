@@ -165,7 +165,8 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
     }catch(error){if(!res.headersSent)json(res,error.status||500,{message:error.status?error.message:'本地服务暂时无法完成此操作，请重试。',code:error.code,recordId:error.recordId,outcome:error.outcome,sourceStatus:dataService.status()});else res.end();}
   };
   const server=tls?https.createServer(tls,handler):http.createServer(handler);
-  server.once('close',()=>dataService.stop());
+  server.on('listening',()=>{ void vision.start?.(); });
+  server.on('close',()=>{ vision.stop?.();dataService.stop(); });
   server.requestTimeout=65000;server.headersTimeout=15000;
   return server;
 }

@@ -6,13 +6,14 @@ const {makeAdminConfig}=require('../lib/admin.cjs');
 const password='synthetic-vision-password-2026';
 const recordId='a'.repeat(64);
 
-async function fixture(t){
+async function fixture(t,hooks={}){
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'gongyi-server-vision-'));
   const calls={report:[],detail:[],import:[],source:0,credentials:0};
   const visionService={
     async report(query){calls.report.push(structuredClone(query));return {records:[{id:recordId,partName:'Tesla_Front12',result:'OK'}],summary:{total:1}};},
     async detail(id){calls.detail.push(id);return {id,measurements:[{name:'测试测点',deviation:0.01,result:'OK'}]};},
-    async importCsv(input){calls.import.push(structuredClone(input));return {imported:1,duplicates:0,recordId};}
+    async importCsv(input){calls.import.push(structuredClone(input));return {imported:1,duplicates:0,recordId};},
+    ...hooks
   };
   const autoSource={
     start(){},stop(){},status(){return {state:'unconfigured'};},
@@ -38,8 +39,19 @@ async function fixture(t){
   async function login(account){const result=await request('POST','/local/login',{username:account,password});assert.equal(result.status,200);return result.cookie;}
   const admin=await login('00001');
   for(const [account,name,role] of [['00002','测试视觉成员','member'],['00003','测试视觉复核员','reviewer']])assert.equal((await request('POST','/local/members',{account,name,role,active:true,password,createOnly:true},admin)).status,200);
-  return {request,login,admin,member:await login('00002'),reviewer:await login('00003'),calls,visionService};
+  return {request,login,admin,member:await login('00002'),reviewer:await login('00003'),calls,visionService,server};
 }
+
+test('vision synchronization starts on listening and stops on close, independently of queries',async t=>{
+  let starts=0,stops=0;
+  const app=await fixture(t,{start(){starts++;},stop(){stops++;}});
+  assert.equal(starts,1);assert.equal(stops,0);
+  assert.equal(app.calls.report.length,0);
+  await app.request('GET','/local/vision/report',undefined,app.member);
+  assert.equal(starts,1);
+  app.server.closeAllConnections();await new Promise(resolve=>app.server.close(resolve));
+  assert.equal(stops,1);
+});
 
 test('vision report, detail and import require a current portal session',async t=>{
   const app=await fixture(t);
