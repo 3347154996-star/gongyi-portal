@@ -3,9 +3,11 @@
   const root = document.getElementById('penetrationWorkbench');
   if (!root) return;
   const $ = id => document.getElementById(id);
-  const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const esc = value => String(value ?? '').replace(/[&<>"'\r\n\t]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','\r':'&#13;','\n':'&#10;','\t':'&#9;'}[char]));
   const count = value => Number.isSafeInteger(value) && value >= 0;
   const alias = value => typeof value === 'string' && /^P-[A-Z0-9-]{1,64}$/.test(value);
+  const productText = value => typeof value === 'string' && value.length > 0 && value.length <= 2000 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value);
+  const validProduct = (value,mode) => mode === 'original' ? productText(value) : alias(value);
   const labels = {all:'全部类别',full:'全切异常反馈',bracket:'快切支架'};
   const diagnosticLabels = {files:'发现来源文件',read:'本次读取文件',reused:'复用未变文件',failed:'读取失败项',skipped:'跳过项',staleFiles:'旧规则缓存待重读（未计入）',incompleteGroups:'不完整月份/类别',outOfScopeRecords:'排除非统计类别记录',duplicates:'跨来源去重记录',conflicts:'跨来源冲突记录',sheets:'工作表数量',supportedSheets:'已识别工作表',unsupportedSheets:'未识别工作表',supportingSheets:'排除独立报告工作表',supportingWorkbooks:'排除独立报告文件',excludedOtherDates:'排除其他日期记录',unknownDate:'日期未明确',unknownResult:'判定未明确',missingProduct:'未注明产品',duplicateRecords:'表内重复记录',conflictingRecords:'表内冲突记录',weakIdentity:'记录身份待核实',ambiguousShortDates:'短日期归属不明确',missingFormulaResults:'缺少公式结果',emptyRows:'空行',feedbackRecords:'来源反馈记录',initialRecords:'来源初检记录',templateRows:'排除预填模板行'};
   const diagnosticWarnings = new Set(['outOfScopeRecords','failed','skipped','staleFiles','incompleteGroups','conflicts','unsupportedSheets','unknownDate','unknownResult','missingProduct','conflictingRecords','weakIdentity','ambiguousShortDates','missingFormulaResults']);
@@ -14,11 +16,12 @@
   const content = new WeakMap();
   const number = value => count(value) ? value.toLocaleString('zh-CN') : '—';
   const percent = value => typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('zh-CN',{maximumFractionDigits:2}) + '%' : '—';
-  function filters(value = {}) {
+  const productLabel = () => state.report?.productNamesMode === 'alias' ? '产品代号' : '产品名称';
+  function filters(value = {},mode = state.report?.productNamesMode || 'original') {
     const year = /^(?:19|20|21)\d{2}$/.test(String(value.year)) ? String(value.year) : '';
     let week = '';const match = new RegExp('^'+year+'-KW(\\d{2})$').exec(value.week);
     if (year && match && window.PortalCalendar) try { week = window.PortalCalendar.range(Number(year),Number(match[1])).key; } catch (_) {}
-    return {year,month:!week && year && new RegExp('^' + year + '-(?:0[1-9]|1[0-2])$').test(value.month) ? value.month : '',week,category:Object.hasOwn(labels,value.category) ? value.category : 'all',product:alias(value.product) ? value.product : ''};
+    return {year,month:!week && year && new RegExp('^' + year + '-(?:0[1-9]|1[0-2])$').test(value.month) ? value.month : '',week,category:Object.hasOwn(labels,value.category) ? value.category : 'all',product:validProduct(value.product,mode) ? value.product : ''};
   }
   function metrics(value) {
     if (!value || !['total','passed','failed','unknown'].every(key => count(value[key])) || value.total !== value.passed + value.failed + value.unknown || !(value.rate === null || typeof value.rate === 'number' && Number.isFinite(value.rate) && value.rate >= 0 && value.rate <= 100)) throw new Error('invalid-report');
@@ -28,16 +31,19 @@
   }
   function normalize(data) {
     if (!data || typeof data.enabled !== 'boolean' || !Array.isArray(data.years) || !Array.isArray(data.months) || !Array.isArray(data.products) || !Array.isArray(data.categories) || !data.sync || !['ready','syncing','error','incomplete','unconfigured'].includes(data.sync.state)) throw new Error('invalid-report');
-    const applied = filters(data.filters);
+    if(data.productNamesMode !== undefined && !['original','alias'].includes(data.productNamesMode)) throw new Error('invalid-report');
+    const productNamesMode = data.productNamesMode || 'alias';
+    const applied = filters(data.filters,productNamesMode);
+    if(data.filters?.product && !applied.product) throw new Error('invalid-report');
     const years = [...new Set(data.years.filter(year => /^(?:19|20|21)\d{2}$/.test(String(year))).map(String))].sort().reverse();
     const months = data.months.map(row => { if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(row.month)) throw new Error('invalid-report');return {month:row.month,...metrics(row)}; }).sort((a,b) => a.month.localeCompare(b.month));
-    const products = data.products.map(row => { if (!alias(row.code)) throw new Error('invalid-report');return {code:row.code,...metrics(row)}; });
+    const products = data.products.map(row => { if (!validProduct(row.code,productNamesMode)) throw new Error('invalid-report');return {code:row.code,...metrics(row)}; });
     const categories = data.categories.filter(row => ['full','bracket'].includes(row.id)).map(row => ({id:row.id,label:labels[row.id],...metrics(row)}));
-    const productOptions = Array.isArray(data.productOptions) ? data.productOptions.filter(alias) : products.map(row => row.code);
+    const productOptions = Array.isArray(data.productOptions) ? data.productOptions.filter(value => validProduct(value,productNamesMode)) : products.map(row => row.code);
     const diagnostics = Object.fromEntries(Object.keys(diagnosticLabels).filter(key => count(data.diagnostics?.[key])).map(key => [key,data.diagnostics[key]]));
     const incomplete = data.incomplete === true || data.complete === false || data.sync.incomplete === true || data.sync.complete === false || data.sync.state === 'incomplete' || diagnostics.failed > 0 || diagnostics.staleFiles > 0 || diagnostics.incompleteGroups > 0;
     const progress = data.sync.progress && ['files','read','failed'].every(key => count(data.sync.progress[key])) ? {files:data.sync.progress.files,read:data.sync.progress.read,failed:data.sync.progress.failed} : null;
-    return {enabled:data.enabled,years,filters:applied,summary:metrics(data.summary),months,products,productOptions,categories,diagnostics,incomplete,sync:{state:data.sync.state,lastSuccessAt:data.sync.lastSuccessAt,lastAttemptAt:data.sync.lastAttemptAt,progress,error:typeof data.sync.error === 'string' ? data.sync.error.slice(0,300) : ''},methodology:typeof data.methodology === 'string' ? data.methodology.slice(0,1000) : '统计口径尚未提供；请核对数据源配置。未判定记录不按合格或不合格补填。',coverageNote:typeof data.coverageNote === 'string' ? data.coverageNote.slice(0,500) : '统计范围仅限已接入记录，不能据此确认现场全部检测均已登记。'};
+    return {enabled:data.enabled,productNamesMode,years,filters:applied,summary:metrics(data.summary),months,products,productOptions,categories,diagnostics,incomplete,sync:{state:data.sync.state,lastSuccessAt:data.sync.lastSuccessAt,lastAttemptAt:data.sync.lastAttemptAt,progress,error:typeof data.sync.error === 'string' ? data.sync.error.slice(0,300) : ''},methodology:typeof data.methodology === 'string' ? data.methodology.slice(0,1000) : '统计口径尚未提供；请核对数据源配置。未判定记录不按合格或不合格补填。',coverageNote:typeof data.coverageNote === 'string' ? data.coverageNote.slice(0,500) : '统计范围仅限已接入记录，不能据此确认现场全部检测均已登记。'};
   }
   function stamp(value) {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return '尚无记录';
@@ -54,7 +60,7 @@
       <label class="field"><span>月份</span><select id="penMonth"><option value="">全年</option></select></label>
       <label class="field"><span>公司周（周五至周四）</span><select id="penWeek"><option value="">不按周筛选</option></select></label>
       <label class="field"><span>检测类别</span><select id="penCategory"><option value="all">全部类别</option><option value="full">全切异常反馈</option><option value="bracket">快切支架</option></select></label>
-      <label class="field"><span>产品代号</span><select id="penProduct"><option value="">全部产品代号</option></select></label>
+      <label class="field pen-product-filter"><span id="penProductLabel">产品名称</span><select id="penProduct"><option value="">全部产品名称</option></select></label>
       <div class="pen-query-actions"><button id="penQuery" class="button primary" type="submit">查询</button><button id="penReset" class="button" type="button">重置</button></div>
       <div class="pen-week-actions"><button id="penPreviousWeek" class="button" type="button">← 前一周</button><button id="penNextWeek" class="button" type="button">后一周 →</button><small>月份与公司周互斥。2026/10/02–10/08 为 KW41；跨年暂按含 1 月 1 日的周为 KW01。</small></div>
       <p id="penDraftHint" class="pen-draft" role="status" hidden>筛选已修改，点击“查询”后生效。自动刷新仍使用已应用条件。</p>
@@ -71,7 +77,7 @@
     <div id="penAnalysis" class="pen-analysis" hidden>
       <section class="pen-panel" aria-labelledby="penTrendTitle"><div class="pen-panel-heading"><div><h2 id="penTrendTitle">已读取记录 · 月度趋势</h2><p>保留类别与产品条件，按来源年份对照首次合格率和全切反馈；点击月份查看当月。</p></div><span class="pen-legend"><i aria-hidden="true"></i>合格率</span></div><div id="penTrend" class="pen-trend"></div></section>
       <section class="pen-panel" aria-labelledby="penCategoryTitle"><div class="pen-panel-heading"><div><h2 id="penCategoryTitle">检测类别</h2><p>按同一查询范围对照，分母以统计口径为准。</p></div></div><div id="penCategories" class="pen-categories"></div></section>
-      <section class="pen-panel pen-products-panel" aria-labelledby="penProductsTitle"><div class="pen-panel-heading"><div><h2 id="penProductsTitle">产品代号统计</h2><p>只显示产品代号，结果使用当前已应用筛选。</p></div><span id="penProductCount" class="pen-table-count"></span></div><div id="penProducts" class="pen-product-table" tabindex="0" aria-label="产品代号统计表"></div></section>
+      <section class="pen-panel pen-products-panel" aria-labelledby="penProductsTitle"><div class="pen-panel-heading"><div><h2 id="penProductsTitle">产品名称统计</h2><p id="penProductsNote">按来源产品名称展示，结果使用当前已应用筛选。</p></div><span id="penProductCount" class="pen-table-count"></span></div><div id="penProducts" class="pen-product-table" tabindex="0" aria-label="产品名称统计表"></div></section>
     </div>`;
   function replace(id,html) {
     const node = $(id);if (content.get(node) === html) return;
@@ -91,12 +97,12 @@
     options('penYear',[['','按来源年份'],...years.map(year => [year,year+' 年'])],selected.year);
     options('penMonth',[['','全年'],...(selected.year ? Array.from({length:12},(_,index) => [selected.year+'-'+String(index+1).padStart(2,'0'),(index+1)+' 月']) : [])],selected.month);
     options('penWeek',[['','不按周筛选'],...(selected.year && window.PortalCalendar ? window.PortalCalendar.weeks(Number(selected.year)).map(info => [info.key,info.label+' · '+info.start.slice(5).replace('-','/')+'–'+info.end.slice(5).replace('-','/')]) : [])],selected.week);
-    options('penProduct',[['','全部产品代号'],...[...new Set([...state.productOptions,...(selected.product ? [selected.product] : [])])].sort().map(code => [code,code])],selected.product);
+    options('penProduct',[['','全部'+productLabel()],...[...new Set([...state.productOptions,...(selected.product ? [selected.product] : [])])].sort().map(code => [code,code])],selected.product);
     $('penCategory').value = selected.category;
     renderDraft();
   }
   function renderDraft() { $('penDraftHint').hidden = JSON.stringify(controls()) === JSON.stringify(state.applied); }
-  function scope(value) { let period = value.month ? Number(value.month.slice(-2))+' 月' : '全年';if(value.week && window.PortalCalendar){const info=window.PortalCalendar.range(Number(value.year),Number(value.week.slice(-2)));period=info.label+'（'+info.start+' 至 '+info.end+'）';}return [(value.year ? value.year+' 年' : '来源年份'),period,labels[value.category],value.product || '全部产品代号'].join(' · '); }
+  function scope(value) { let period = value.month ? Number(value.month.slice(-2))+' 月' : '全年';if(value.week && window.PortalCalendar){const info=window.PortalCalendar.range(Number(value.year),Number(value.week.slice(-2)));period=info.label+'（'+info.start+' 至 '+info.end+'）';}return [(value.year ? value.year+' 年' : '来源年份'),period,labels[value.category],value.product || '全部'+productLabel()].join(' · '); }
   function renderStatus() {
     const report = state.report,sync = report?.sync,busy = Boolean(state.request),syncing = sync?.state === 'syncing' || state.request?.synchronize;
     $('penQuery').disabled = busy || !state.active;$('penRefresh').disabled = busy || !state.active || report?.enabled === false || sync?.state === 'unconfigured';
@@ -111,6 +117,9 @@
   }
   function renderData() {
     const report = state.report,s = report?.enabled && report.sync.state !== 'unconfigured' ? report.summary : null;
+    $('penProductLabel').textContent = productLabel();$('penProductsTitle').textContent = productLabel()+'统计';
+    $('penProductsNote').textContent = report?.productNamesMode === 'alias' ? '按产品代号展示，结果使用当前已应用筛选。' : '按来源产品名称展示，结果使用当前已应用筛选。';
+    $('penProducts').setAttribute('aria-label',productLabel()+'统计表');
     $('penScope').textContent = report ? scope(state.applied) : '尚未应用筛选';
     replace('penStats',[
       ['首次检测合格率',s ? percent(s.rate) : '—',s ? '快切已判定分母 '+number(s.passed+s.failed)+' 条' : '仅快切已判定记录','rate'],['快切初检记录',s ? number(s.total) : '—','焊缝记录数，不等于件数',''],['首次合格',s ? number(s.passed) : '—','不混入复切结果','passed'],['首次不合格',s ? number(s.failed) : '—','保留初检判定','failed'],['初检未判定',s ? number(s.unknown) : '—','不计入合格率分母','unknown'],['全切异常反馈',s ? number(s.feedbackCount) : '—','缺少总检测数，不计算合格率','feedback']
@@ -123,12 +132,12 @@
     replace('penRetests',report && report.summary.retestPassed !== null ? '<dl>'+[['复检合格',report.summary.retestPassed],['复检不合格',report.summary.retestFailed],['未记录复检结论',report.summary.retestUnknown]].map(([label,value]) => '<div><dt>'+label+'</dt><dd>'+number(value)+'</dd></div>').join('')+'</dl><p>“未记录”表示来源未提供复检结论，不表示已安排或尚待复检。</p>' : '<p class="pen-empty compact">尚未提供复检分类统计。</p>');
     const empty = !report || !report.enabled || !(report.summary.total || report.summary.feedbackCount);
     $('penEmpty').hidden = !empty;$('penAnalysis').hidden = empty;
-    $('penEmpty').textContent = !report ? '尚未读取统计数据。' : !report.enabled ? '数据尚未接入，完成配置后可查看月度与产品统计。' : '当前条件没有检测记录。可调整年份、月份、类别或产品代号后查询。';
+    $('penEmpty').textContent = !report ? '尚未读取统计数据。' : !report.enabled ? '数据尚未接入，完成配置后可查看月度与产品统计。' : '当前条件没有检测记录。可调整年份、月份、类别或产品后查询。';
     if (!report) { for (const id of ['penTrend','penProducts','penCategories']) replace(id,'');$('penProductCount').textContent = '';return; }
     replace('penTrend',report.months.length ? report.months.map(row => `<button type="button" class="pen-month-row${state.applied.month === row.month ? ' selected' : ''}" data-pen-month="${esc(row.month)}" aria-label="${esc(row.month)}，首次检测合格率 ${percent(row.rate)}，快切初检 ${number(row.total)}，未判定 ${number(row.unknown)}，全切反馈 ${number(row.feedbackCount)}，查看当月"><span class="pen-month-label">${Number(row.month.slice(-2))} 月</span><span class="pen-month-track"><span style="width:${row.rate === null ? 0 : row.rate}%"></span></span><strong>${percent(row.rate)}</strong><small>快切初检 ${number(row.total)} · 未判定 ${number(row.unknown)} · 全切反馈 ${number(row.feedbackCount)}</small></button>`).join('') : '<p class="pen-empty compact">当前范围暂无月度记录。</p>');
     replace('penCategories',report.categories.length ? report.categories.map(row => row.id === 'full' ? `<article class="pen-category feedback"><div><h3>全切异常反馈</h3><strong>${number(row.feedbackCount)}</strong></div><p>缺少总检测数量，仅展示异常反馈记录，不计算首次检测合格率。</p></article>` : `<article class="pen-category"><div><h3>${esc(row.label)}</h3><strong>${percent(row.rate)}</strong></div><dl><div><dt>初检记录</dt><dd>${number(row.total)}</dd></div><div><dt>首次合格</dt><dd>${number(row.passed)}</dd></div><div><dt>首次不合格</dt><dd>${number(row.failed)}</dd></div><div><dt>未判定</dt><dd>${number(row.unknown)}</dd></div></dl></article>`).join('') : '<p class="pen-empty compact">当前范围暂无类别记录。</p>');
-    $('penProductCount').textContent = report.products.length+' 个产品代号';
-    replace('penProducts',report.products.length ? '<table><thead><tr><th scope="col">产品代号</th><th scope="col">快切初检</th><th scope="col">首次合格</th><th scope="col">首次不合格</th><th scope="col">未判定</th><th scope="col">全切反馈</th><th scope="col">首次合格率</th></tr></thead><tbody>'+report.products.map(row => '<tr><th scope="row">'+esc(row.code)+'</th>'+[['快切初检',number(row.total)],['首次合格',number(row.passed)],['首次不合格',number(row.failed)],['未判定',number(row.unknown)],['全切反馈',number(row.feedbackCount)],['首次合格率',percent(row.rate)]].map(([label,value]) => `<td data-label="${label}">${value}</td>`).join('')+'</tr>').join('')+'</tbody></table>' : '<p class="pen-empty compact">当前范围暂无产品统计。</p>');
+    $('penProductCount').textContent = report.products.length+' 个产品';
+    replace('penProducts',report.products.length ? '<table><thead><tr><th scope="col">'+productLabel()+'</th><th scope="col">快切初检</th><th scope="col">首次合格</th><th scope="col">首次不合格</th><th scope="col">未判定</th><th scope="col">全切反馈</th><th scope="col">首次合格率</th></tr></thead><tbody>'+report.products.map(row => '<tr><th scope="row">'+esc(row.code)+'</th>'+[['快切初检',number(row.total)],['首次合格',number(row.passed)],['首次不合格',number(row.failed)],['未判定',number(row.unknown)],['全切反馈',number(row.feedbackCount)],['首次合格率',percent(row.rate)]].map(([label,value]) => `<td data-label="${label}">${value}</td>`).join('')+'</tr>').join('')+'</tbody></table>' : '<p class="pen-empty compact">当前范围暂无产品统计。</p>');
   }
   function clearTimer() { clearTimeout(state.timer);state.timer = null; }
   function cancel() { clearTimer();const request = state.request;state.request = null;if (request) { clearTimeout(request.timeout);request.controller.abort(); } }
@@ -153,7 +162,8 @@
       if (!selected.year) params.delete('year');if (!selected.week) params.delete('week');
       const report = normalize(await api('/local/penetration/report?'+params,{signal:request.controller.signal}));
       if (state.request !== request || request.epoch !== state.epoch) return;
-      const draft = controls();state.report = report;state.applied = report.filters;state.productOptions = new Set(report.productOptions);remember();
+      const draft = controls();if(draft.product === state.applied.product && selected.product === state.applied.product) draft.product = report.filters.product;
+      state.report = report;state.applied = report.filters;state.productOptions = new Set(report.productOptions);remember();
       fillControls((apply || initial) && request.draftVersion === state.draftVersion ? state.applied : draft);
       renderData();
     } catch (error) {

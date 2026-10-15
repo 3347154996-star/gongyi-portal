@@ -33,6 +33,64 @@ test('product aliases persist across restart, remain stable and never mutate sou
   assert.ok(fs.existsSync(path.join(root, 'runtime/product-aliases.json')));
 });
 
+test('original-name mode retains exact source text and existing alias mappings without rewriting the registry', t => {
+  const root=workspace(t), source={partName:'  合成产品 <A&B>  ',sourceFile:'Synthetic/name.csv',notes:'合成产品 <A&B>',count:7};
+  const old=createProductPrivacy({root,config:{privacy:{terms:[MODEL]}}}), coded=old.protect(source);
+  const file=path.join(root,'runtime/product-aliases.json'), before=fs.readFileSync(file);
+  const original=createProductPrivacy({root,config:{privacy:{productNames:'original',terms:[MODEL]}}});
+  assert.equal(original.productNamesMode,'original');
+  assert.equal(original.alias(source.partName),source.partName);
+  const result=original.protect(source);assert.deepEqual(result,source);assert.notEqual(result,source);
+  assert.equal(original.replaceText(source.partName),source.partName);
+  assert.equal(original.restore(coded.sourceFile),source.sourceFile);
+  assert.equal(original.restore(old.alias(MODEL)),MODEL);
+  original.protect({partName:OTHER});original.save();
+  assert.deepEqual(fs.readFileSync(file),before);
+  assert.throws(()=>createProductPrivacy({root,config:{privacy:{productNames:'invalid'}}}),{status:503});
+});
+
+test('original names observed in source responses take precedence over colliding legacy product and file codes', t => {
+  const root=workspace(t), old=createProductPrivacy({root});
+  const coded=old.protect({partName:MODEL,sourceFile:'synthetic-report.csv',materialName:OTHER});
+  const file=path.join(root,'runtime/product-aliases.json'), before=fs.readFileSync(file);
+  const original=createProductPrivacy({root,config:{privacy:{productNames:'original'}}});
+  assert.equal(original.restore(coded.partName),MODEL,'An unseen direct request remains compatible with legacy codes');
+  const source={partName:coded.partName,sourceFile:'folder/'+coded.sourceFile+'.csv',counts:{['line-'+coded.partName]:3}}, snapshot=structuredClone(source);
+  assert.deepEqual(original.protect(source),snapshot);assert.deepEqual(source,snapshot);
+  assert.equal(original.restore(coded.partName),coded.partName);
+  assert.equal(original.restore(coded.sourceFile),coded.sourceFile);
+  assert.deepEqual(original.restore({materialName:coded.partName,line:'line-'+coded.partName,filename:'folder/'+coded.sourceFile+'.csv'}),{materialName:coded.partName,line:'line-'+coded.partName,filename:'folder/'+coded.sourceFile+'.csv'});
+  assert.equal(original.restore(coded.materialName),OTHER,'Unrelated legacy codes are still restored');
+  original.save();assert.deepEqual(fs.readFileSync(file),before);
+});
+
+test('explicit original-source learning preserves literal codes in values and object keys without changing the registry', t => {
+  const root=workspace(t), old=createProductPrivacy({root}), coded=old.protect({partName:MODEL,sourceFile:'synthetic-report.csv'});
+  const file=path.join(root,'runtime/product-aliases.json'), before=fs.readFileSync(file);
+  const original=createProductPrivacy({root,config:{privacy:{productNames:'original'}}});
+  const source={products:[{value:coded.partName,label:'literal '+coded.partName}],byFilename:{[coded.sourceFile]:4}}, snapshot=structuredClone(source);
+  original.learn(source);assert.deepEqual(source,snapshot);
+  assert.deepEqual(original.restore(source),source);
+  assert.equal(original.restore(coded.sourceFile),coded.sourceFile);
+  original.save();assert.deepEqual(fs.readFileSync(file),before);
+});
+
+test('original-name mode initializes literal collisions from configured names and persisted raw names after restart', t => {
+  const root=workspace(t), old=createProductPrivacy({root});
+  const code=old.alias(MODEL), fileCode=old.alias('synthetic-report.csv','F');
+  const literalName='SYNTHETIC_LINE_'+code, literalCode=old.alias(literalName);old.save();
+  const file=path.join(root,'runtime/product-aliases.json'), before=fs.readFileSync(file);
+  for(let restart=0;restart<2;restart++){
+    const original=createProductPrivacy({root,config:{weldMaterialNames:[fileCode],privacy:{productNames:'original'}}});
+    assert.equal(original.restore(code),code,'Persisted raw names establish literal tokens before any response');
+    assert.equal(original.restore(literalCode),literalName,'The separate legacy alias still resolves to its exact raw name');
+    assert.equal(original.restore(fileCode),fileCode,'Configured original names take precedence at startup');
+    assert.equal(original.restore('line-'+code+'-'+fileCode),'line-'+code+'-'+fileCode);
+    original.protect({notes:'ordinary source text',partName:'P-0000000000000000'});original.save();
+    assert.deepEqual(fs.readFileSync(file),before);
+  }
+});
+
 test('product dropdown value and label both use stable aliases while the all option is preserved', t => {
   const privacy = createProductPrivacy({ root: workspace(t) });
   const source = { filters: { materialNames: [{ value: 'all', label: '全部物料', count: 3 }, { value: MODEL, label: MODEL, count: 2 }, { value: OTHER, label: OTHER, count: 1 }], parts: ['all', MODEL, OTHER] } };
@@ -134,4 +192,13 @@ test('portal JSON boundary aliases catalog and report data and restores business
   await first.close(); const second = await start();
   const afterRestart = await second.get('/local/data/weld?start=2026-10-02&end=2026-10-08&materialName=' + code);
   assert.equal(afterRestart.filters.materialNames[1].value, code); assert.equal(queries.at(-1).query.materialName, MODEL);
+  await second.close();config.privacy.productNames='original';const originalMode=await start();
+  const named=await originalMode.get('/local/data/weld?start=2026-10-02&end=2026-10-08&materialName='+code);
+  assert.deepEqual(named.rows,sourceData.rows);assert.equal(named.filters.materialNames[1].value,MODEL);
+  assert.equal(named.resolvedQuery.materialName,MODEL);assert.equal(queries.at(-1).query.materialName,MODEL);
+  assert.deepEqual(await originalMode.get('/local/vision/catalog'),fleet);
+  const namedVision=await originalMode.get('/local/vision/report?part='+code);
+  assert.equal(namedVision.records[0].partName,MODEL);assert.equal(namedVision.resolvedFilters.part,MODEL);
+  const namedStock=await originalMode.get('/local/inventory/catalog?search='+code);
+  assert.equal(namedStock.items[0].name,MODEL);assert.equal(queries.at(-1).query.search,MODEL);
 });

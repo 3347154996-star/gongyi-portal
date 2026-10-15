@@ -14,3 +14,33 @@ test('changing the configured source never displays records from a different sha
 test('records from obsolete parser rules are withheld until reparsed',async t=>{const {service,root,privacy}=fixture(t,()=>({promise:Promise.resolve(snapshot([row('a','2026-10-02','OK')]))}));await service.sync();const filename=path.join(root,'runtime','penetration','cache.json'),saved=JSON.parse(fs.readFileSync(filename,'utf8'));saved.files.file.version=0;fs.writeFileSync(filename,JSON.stringify(saved));const restored=createPenetrationService({root,config:{penetration:{directory:'synthetic-only',year:2026}},privacy});t.after(()=>restored.stop());const report=restored.report();assert.equal(report.summary.total,0);assert.equal(report.diagnostics.staleFiles,1);assert.equal(report.sync.state,'error');});
 test('cross-year weeks disclose that only the configured calendar year is loaded',async t=>{const {service}=fixture(t,()=>({promise:Promise.resolve(snapshot([row('a','2026-01-01','OK'),row('b','2025-12-31','NG')]))}));await service.sync();const report=service.report({week:'2026-KW01'});assert.equal(report.summary.total,1);assert.match(report.coverageNote,/不是完整周/);assert.doesNotMatch(service.report({week:'2026-KW41'}).coverageNote,/不是完整周/);});
 test('only bracket initial records enter the rate even if another category has judgment columns',async t=>{const records=[row('a','2026-10-02','OK',{category:'full'}),row('b','2026-10-02','NG',{category:'full',kind:'feedback'}),row('c','2026-10-02','OK')];const {service}=fixture(t,()=>({promise:Promise.resolve(snapshot(records))}));await service.sync();const report=service.report();assert.equal(report.summary.total,1);assert.equal(report.summary.feedbackCount,1);assert.equal(report.diagnostics.outOfScopeRecords,1);const full=service.report({category:'full'});assert.equal(full.summary.rate,null);assert.equal(full.summary.denominator,0);assert.equal(full.summary.feedbackCount,1);const {aggregate}=require('../lib/penetration.cjs');assert.equal(aggregate([records[0]]).rate,null);});
+
+test('original names retain exact product groups and known historical aliases still select the same records',async t=>{
+  const names=['合成产品 A / 左支架','合成产品A / 左支架','=合成<产品> & "右支架"'];
+  const records=names.map((product,index)=>row(String(index),'2026-10-02',index===1?'NG':'OK',{product}));
+  const {root,service:aliasService,privacy:aliases}=fixture(t,()=>({promise:Promise.resolve(snapshot(records))}));
+  await aliasService.sync();const oldCode=aliases.alias(names[0]);aliases.save();
+  const privacy=createProductPrivacy({root,config:{privacy:{productNames:'original'}}});
+  const service=createPenetrationService({root,config:{penetration:{directory:'synthetic-only',year:2026}},privacy});t.after(()=>service.stop());
+  const report=service.report();assert.equal(report.productNamesMode,'original');
+  assert.deepEqual(report.productOptions,[...names].sort());assert.equal(report.products.length,3);
+  assert.equal(report.summary.total,3);assert.equal(report.summary.passed,2);assert.equal(report.summary.failed,1);
+  for(const name of names){const result=service.report({product:name});assert.equal(result.filters.product,name);assert.equal(result.summary.total,1);assert.equal(result.products[0].code,name);}
+  const legacy=service.report({product:oldCode});assert.equal(legacy.filters.product,names[0]);assert.equal(legacy.summary.passed,1);
+  const unknown=service.report({product:'P-0000000000000000'});assert.equal(unknown.summary.total,0);assert.equal(unknown.filters.product,'P-0000000000000000');
+  assert.throws(()=>service.report({product:{name:names[0]}}),/无效/);assert.throws(()=>service.report({product:'A'.repeat(2001)}),/无效/);
+  assert.equal(aliasService.report().productNamesMode,'alias');assert.throws(()=>aliasService.report({product:'unknown synthetic original name'}),/无效/);
+  const switchedBack=aliasService.report({product:names[0]});assert.equal(switchedBack.filters.product,oldCode);assert.equal(switchedBack.summary.total,1);assert.ok(!JSON.stringify(switchedBack).includes(names[0]));
+});
+
+test('an actual source product that resembles a legacy code is not merged into the mapped product',async t=>{
+  const {root,privacy:aliases,service:originalFixture}=fixture(t,()=>({promise:Promise.resolve(snapshot([]))}));
+  originalFixture.stop();const sourceName='合成原名';const token=aliases.alias(sourceName);aliases.save();
+  const privacy=createProductPrivacy({root,config:{privacy:{productNames:'original'}}});
+  const service=createPenetrationService({root,config:{penetration:{directory:'synthetic-only',year:2026}},privacy,scanner:()=>({promise:Promise.resolve(snapshot([
+    row('source','2026-10-02','OK',{product:sourceName}),
+    row('literal','2026-10-02','NG',{product:token,category:'full',kind:'feedback'})
+  ]))})});t.after(()=>service.stop());await service.sync();
+  const selected=service.report({product:token});assert.equal(selected.summary.total,0);assert.equal(selected.summary.feedbackCount,1);assert.equal(selected.filters.product,token);
+  const otherCategory=service.report({product:token,category:'bracket'});assert.equal(otherCategory.summary.total,0);
+});

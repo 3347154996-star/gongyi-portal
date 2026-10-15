@@ -1,6 +1,7 @@
 
 'use strict';
 const privacy=window.ToolPrivacy;
+document.getElementById('namePolicy').textContent=privacy.nameNotice;
 const procName=value=>privacy.alias('程序',value);
 const dataName=(kind,value)=>privacy.engineering(kind,value);
 let FILES=[];
@@ -262,7 +263,7 @@ function buildResult(matched){
 }
 
 // export
-const HEAD=['序号','任务','过程','主程序','触发信号','行号','焊点标签/代号','焊接数据名','seamdata','速度(mm/s)','速度(IPM)','焊接模式','电压(V)','电流(A)','welddata数值声明'];
+const HEAD=['序号','任务','过程','主程序','触发信号','行号','焊点标签','焊接数据名','seamdata','速度(mm/s)','速度(IPM)','焊接模式','电压(V)','电流(A)','welddata声明'];
 function exportRowsArr(list){return list.map((r,i)=>{const d=r.wd,sp=(d&&d.speed!=null)?d.speed:null;
   return [i+1,r.task,procName(r.proc),(MS_TXT[r.ms]||''),privacy.alias('信号',r.trig),r.segline,dataName('标签',r.label),dataName('焊接数据',r.weld),dataName('焊缝数据',r.seam),sp!=null?rnd(sp,4):'',sp!=null?rnd(sp*SPD_K,2):'',(d&&d.mode!=null)?(d.mode+(MODES[d.mode]?(' '+privacy.mode(MODES[d.mode])):'')):'',(d&&d.volt!=null)?d.volt:'',(d&&d.current!=null)?rnd(d.current*CUR_K,2):'',d?privacy.rawWeld(d.raw):''];});}
 function safeCell(v){return typeof v==='string'&&/^[\s]*[=+@-]/.test(v)?"'"+v:v;}

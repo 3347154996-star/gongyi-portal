@@ -17,6 +17,8 @@ test('tools manifest and schemas describe working local entries, and remote adap
     assert.ok(fs.existsSync(path.join(root, tool.entry.replace('/tools/', ''))));
     const contract = service.contract(tool.id);
     assert.equal(contract.version, '1.0.0'); assert.equal(contract.remoteAdapter.enabled, false);
+    assert.equal(contract.displayPrivacy.defaultMode, 'original'); assert.equal(contract.displayPrivacy.optionalMode, 'alias');
+    assert.match(contract.displayPrivacy.mapping, /independent of config\.privacy\.productNames/);
     assert.equal(contract.inputSchema.type, 'object'); assert.equal(contract.outputSchema.type, 'object');
     assert.throws(() => service.runRemote(tool.id), error => error.statusCode === 501 && error.code === 'tool_adapter_disabled');
   }
@@ -64,8 +66,8 @@ test('weld import parses task-specific data and clears stale main calls on subse
   assert.equal(result.rowCount, 1); assert.equal(result.rows[0][1], 'TASK1');
   assert.equal(result.rows[0][9], 10); assert.equal(result.rows[0][10], 23.62);
   assert.equal(result.rows[0][12], 24); assert.equal(result.rows[0][13], 236.22);
-  assert.doesNotMatch(get('resTable').innerHTML, /Synthetic seam|WL_DEMO/);
-  assert.match(get('resTable').innerHTML, /程序-[A-Z0-9]+/);
+  assert.match(get('resTable').innerHTML, /Synthetic seam|WL_DEMO/);
+  assert.match(get('resTable').innerHTML, /Synthetic seam &lt;img src=x&gt;/);
   assert.doesNotMatch(get('resTable').innerHTML, /<img src=x>/);
   await context.window.WeldExportTool.importFiles([file('Test.mod', weldText, 'Backup/TASK1/Test.mod')]);
   assert.equal(context.window.WeldExportTool.getResult().rowCount, 0, 'No stale main call from the earlier backup');

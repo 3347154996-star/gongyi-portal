@@ -77,3 +77,24 @@ test('invalid date submission keeps automatic refresh alive on the committed que
   assert.equal(f.node('#startDate').value, '2026-10-20');assert.equal(f.node('#keywordInput').value, '尚未提交草稿');
   assert.equal(f.app.state.polling, true);assert.ok(f.app.state.timer);
 });
+
+test('resolved product names update the applied query and its unchanged login-session controls',async()=>{
+  const old='P-1234567890ABCDEF',name='合成产品 <A&B>';
+  const f=fixture(()=>({ok:true,status:200,json:async()=>({rows:[],total:0,resolvedQuery:{materialName:name,keyword:name,defects:[name+'_缺陷']}})}));
+  Object.assign(f.app.queries.modules.weld.query,{materialName:old,keyword:old,defects:[old+'_缺陷']});
+  f.app.state.defects=[old+'_缺陷'];f.app.state.defectDraft=[old+'_缺陷'];
+  f.node('#materialFilter').options.push({value:old,textContent:old});f.node('#materialFilter').value=old;f.node('#keywordInput').value=old;
+  await f.app.loadData('manual');
+  assert.equal(f.app.state.result.query.materialName,name);assert.equal(f.app.state.result.query.keyword,name);
+  assert.equal(f.node('#materialFilter').value,name);assert.equal(f.node('#keywordInput').value,name);
+  assert.deepEqual([...f.app.state.result.query.defects],[name+'_缺陷']);assert.deepEqual([...f.app.state.defects],[name+'_缺陷']);assert.deepEqual([...f.app.state.defectDraft],[name+'_缺陷']);
+});
+
+test('resolved product names do not overwrite a keyword draft changed during the request',async()=>{
+  let release;const pending=new Promise(resolve=>{release=resolve});
+  const f=fixture(()=>pending),old='P-1234567890ABCDEF';
+  f.app.queries.modules.weld.query.keyword=old;f.node('#keywordInput').value=old;
+  const task=f.app.loadData('manual');f.node('#keywordInput').value='新草稿';
+  release({ok:true,status:200,json:async()=>({rows:[],total:0,resolvedQuery:{keyword:'合成来源名称'}})});await task;
+  assert.equal(f.app.state.result.query.keyword,'合成来源名称');assert.equal(f.node('#keywordInput').value,'新草稿');
+});

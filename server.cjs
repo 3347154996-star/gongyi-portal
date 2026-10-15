@@ -28,7 +28,7 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
   const vision=visionService||createVisionService({root,config,now});
   const toolService=createToolsService();
   const privacy=createProductPrivacy({root,config});
-  const json=(res,status,data,headers={})=>{try{return writeJson(res,status,privacy.protect(data),headers);}catch(_){return writeJson(res,503,{message:'产品代号配置暂不可用，已停止返回业务数据。'});}};
+  const json=(res,status,data,headers={})=>{try{return writeJson(res,status,privacy.protect(data),headers);}catch(_){return writeJson(res,503,{message:'产品名称配置暂不可用，已停止返回业务数据。'});}};
   const penetration=penetrationService||createPenetrationService({root,config,privacy,now});
   async function stockCapabilities(){try{return await inventory.capabilities();}catch(_){return Object.fromEntries(['inbound','outbound','adjust'].map(key=>[key,{enabled:false,reason:'本机库存记录无法读取，请管理员核对存储文件。'}]));}}
   const tls=config.tls?.certFile&&config.tls?.keyFile?{cert:fs.readFileSync(path.resolve(root,config.tls.certFile)),key:fs.readFileSync(path.resolve(root,config.tls.keyFile))}:null;
@@ -97,9 +97,10 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
           return json(res,200,result);
         }
         if(req.method==='GET'&&url.pathname==='/local/vision/report'){
-          const result=await vision.report(privacy.restore(Object.fromEntries(url.searchParams)));
+          const resolvedFilters=privacy.restore(Object.fromEntries(url.searchParams));
+          const result=await vision.report(resolvedFilters);
           if(!getSession(req))throw new PortalError('会话已退出，请重新登录。',401);
-          return json(res,200,result);
+          return json(res,200,{...result,resolvedFilters});
         }
         const visionRecord=/^\/local\/vision\/records\/([a-f0-9]{64})$/.exec(url.pathname);
         if(req.method==='GET'&&visionRecord){
@@ -150,9 +151,10 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
         if(req.method==='GET'&&match){
           if(match[1]==='spares'&&session.role!=='admin')throw new PortalError('请使用工艺部备件工作台查询已配置范围内的备件。',403);
           const module=match[1],query=parseQuery(url.searchParams,module);
-          const result=await dataService.read(module,privacy.restore(query));
+          const resolvedQuery=privacy.restore(query);
+          const result=await dataService.read(module,resolvedQuery);
           if(!getSession(req))throw new PortalError('会话已退出，请重新登录。',401);
-          return json(res,200,result);
+          return json(res,200,{...result,resolvedQuery});
         }
         if(req.method==='POST'&&url.pathname==='/local/import-preview'){
           const input=await body(req);const {previewImport}=require('./lib/import-preview.cjs');

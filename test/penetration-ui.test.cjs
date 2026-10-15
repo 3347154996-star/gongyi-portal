@@ -167,3 +167,53 @@ test('supporting inspection reports are explained as deliberate exclusions witho
   assert.match(f.node('penCoverage').textContent,/全切仅纳入异常反馈汇总；独立检测报告不混算/);
   assert.match(f.node('penStats').innerHTML,/77\.78%/);
 });
+
+test('original product names are escaped text and submitted without normalization or loss of special characters',async () => {
+  const names=['合成产品 A / 左支架','合成产品A / 左支架','=合成<img src=x onerror="alert(1)"> & \'右支架\'\n第二行'];
+  const f=fixture(url=>{const query=Object.fromEntries(new URL(url,'http://fixture').searchParams);return response(report({productNamesMode:'original',filters:{year:2026,category:'all',...query},productOptions:names,products:names.map(code=>({code,...totals}))}));});
+  await f.api.setContext(account,true);
+  assert.equal(f.node('penProductLabel').textContent,'产品名称');assert.equal(f.node('penProductsTitle').textContent,'产品名称统计');
+  assert.match(f.node('penProducts').innerHTML,/合成产品 A \/ 左支架/);assert.match(f.node('penProducts').innerHTML,/合成产品A \/ 左支架/);
+  assert.match(f.node('penProducts').innerHTML,/&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt; &amp; &#39;右支架&#39;&#10;第二行/);
+  assert.doesNotMatch(f.node('penProducts').innerHTML,/<img|<script/);assert.doesNotMatch(f.node('penProduct').innerHTML,/<img|<script/);
+  f.node('penProduct').value=names[2];await f.fire('penProduct','change');await f.fire('penQueryForm','submit');
+  assert.equal(new URL(f.requests.at(-1).url,'http://fixture').searchParams.get('product'),names[2]);
+  assert.equal(f.node('penProduct').value,names[2]);assert.ok(f.node('penScope').textContent.includes(names[2]));
+});
+
+test('an original-name session query survives reload before the first report identifies the display mode',async () => {
+  const product='合成产品 / 左支架';
+  const stored=new Map([['portal:penetration:filters:v1:synthetic-member',JSON.stringify({year:2026,month:'2026-10',category:'all',product})]]);
+  const f=fixture(url=>response(report({productNamesMode:'original',filters:Object.fromEntries(new URL(url,'http://fixture').searchParams),products:[{code:product,...totals}]})),stored);
+  await f.api.setContext(account,true);
+  assert.equal(new URL(f.requests[0].url,'http://fixture').searchParams.get('product'),product);
+  assert.equal(f.node('penProduct').value,product);assert.equal(JSON.parse([...stored.values()][0]).product,product);
+});
+
+test('legacy alias filters become the restored original name without discarding an unrelated date draft',async () => {
+  const product='合成产品 / 支架';let reads=0;
+  const f=fixture(()=>response(++reads===1?report({filters:{year:2026,category:'all',product:'P-A123'}}):report({productNamesMode:'original',filters:{year:2026,category:'all',product},products:[{code:product,...totals}]})));
+  await f.api.setContext(account,true);assert.equal(f.node('penProduct').value,'P-A123');
+  f.node('penMonth').value='2026-09';await f.fire('penMonth','change');await f.poll();
+  assert.equal(f.node('penProduct').value,product);assert.equal(f.node('penMonth').value,'2026-09');
+  assert.equal(f.node('penDraftHint').hidden,false);assert.equal(f.node('penProductLabel').textContent,'产品名称');
+  assert.equal(JSON.parse([...f.storage.values()][0]).product,product);
+});
+
+test('a saved original-name query can be remapped to the same product when the server switches back to alias mode',async () => {
+  const product='合成产品 / 支架';
+  const stored=new Map([['portal:penetration:filters:v1:synthetic-member',JSON.stringify({year:2026,category:'all',product})]]);
+  const f=fixture(()=>response(report({productNamesMode:'alias',filters:{year:2026,category:'all',product:'P-A123'}})),stored);
+  await f.api.setContext(account,true);assert.equal(new URL(f.requests[0].url,'http://fixture').searchParams.get('product'),product);
+  assert.equal(f.node('penProduct').value,'P-A123');assert.equal(f.node('penProductLabel').textContent,'产品代号');
+  assert.equal(JSON.parse([...stored.values()][0]).product,'P-A123');assert.doesNotMatch(f.node('penProducts').innerHTML,/合成产品/);
+  await f.poll();assert.equal(new URL(f.requests.at(-1).url,'http://fixture').searchParams.get('product'),'P-A123');
+});
+
+test('unrecognized display modes and invalid original-name values preserve the last successful snapshot',async () => {
+  let next=report({productNamesMode:'original',products:[{code:'合成产品',...totals}]});const f=fixture(()=>response(next));
+  await f.api.setContext(account,true);const previous=f.node('penProducts').innerHTML;
+  for(const change of [{productNamesMode:'unexpected'}, {productNamesMode:'original',products:[{code:'bad\u0000name',...totals}]}]){
+    next=report(change);await f.poll();assert.equal(f.node('penProducts').innerHTML,previous);assert.match(f.node('penError').textContent,/格式未通过校验/);
+  }
+});

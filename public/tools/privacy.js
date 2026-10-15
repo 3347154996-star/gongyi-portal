@@ -1,9 +1,15 @@
 (function (global) {
   'use strict';
-  // Local aliases are independent of the portal's server-side product catalog.
-  // They are display identifiers, not encryption or a promise of irreversible anonymization.
+  // Names are shown as supplied by default, independently of the portal's server policy.
+  // Deployments may opt in before this script loads; old aliases have no reverse mapping.
+  const anonymizeNames = global.ToolPrivacyOptions?.anonymizeNames === true;
+  const original = value => String(value ?? '');
+  const nameNotice = anonymizeNames
+    ? '已启用名称代号：显示、搜索及导出使用同一代号，数字编号和工程点位保留。原名称不写入结果；本工具代号与门户产品目录独立。'
+    : '按原文件显示名称，搜索、复制和导出保留原名称。旧脱敏结果若只保存了代号，将继续显示已有代号；重新导入原文件可显示原名称。';
   const kinds = new Set(['文件','工作表','程序','信号','标签','焊接数据','焊缝数据','模式说明','工件','配对','测点','字段']);
   function alias(kind, value) {
+    if (!anonymizeNames) return original(value);
     const text = String(value ?? '').trim(); if (!text) return '';
     if (/^(?:文件|工作表|程序|信号|标签|焊接数据|焊缝数据|模式说明|工件|配对|测点|字段)-[0-9A-Z]{13}(?: \/ [WP]\d+(?:_[XYZ])?)*$/.test(text)) return text;
     const prefix = kinds.has(kind) ? kind : '字段';
@@ -12,6 +18,7 @@
     return prefix + '-' + hash.toString(36).toUpperCase().padStart(13, '0');
   }
   function engineering(kind, value) {
+    if (!anonymizeNames) return original(value);
     const text = String(value ?? '').trim();
     // Preserve unambiguous point/data syntax, never a free-text suffix.
     if (/^(?:\d+(?:[_.\/-]\d+)*|[WP]?\d+(?:[_ -][XYZ])?|[XYZ]|(?:weld|seam)\d+|(?:焊点|焊缝|点位|点)\s*\d+)$/i.test(text)) return text;
@@ -21,6 +28,7 @@
   }
   const sn = value => /^\d+$/.test(String(value ?? '')) ? String(value) : alias('工件', value);
   function mode(value) {
+    if (!anonymizeNames) return original(value);
     const text = String(value ?? '').trim();
     return /^(?:CV|CC|PULSE|STT|GMAW|FCAW|MIG|MAG|TIG)(?:[ _-](?:ArMix|CO2|Ar|Steel|Stainless|Aluminum|Aluminium|Pulse|Spray|Short|Arc|AC|DC|\d+(?:\.\d+)?))*$/i.test(text) ? text : alias('模式说明', text);
   }
@@ -71,5 +79,5 @@
   }
   const errors = new Set(['请使用 .xlsx 或 .xlsm 文件；其他格式请先另存为 .xlsx。','文件超过 64 MB，请导出所需日期范围后再导入。','文件同时包含两种报表，请分别放入对应的导入框。','未识别为当前现场检具或三坐标模板，请检查表头与工作表。','文件为空，无法读取。','单个 Excel 超过 64 MB，请按时间范围分批导出。','工作表内容过大，请分批导出后导入。','此文件包含不支持的 XML 定义，请重新另存为 .xlsx。','Excel 解压后单个文件超过 100 MB，请缩小报告范围。','Excel 解压后文件合计超过 200 MB，请分批导入。','Excel 实际展开内容超过大小限制，请缩小报告范围。','Excel 压缩目录大小无效，请重新另存为 .xlsx。','Excel 压缩目录与实际展开大小不一致，请重新另存为 .xlsx。','所选工作表未识别为现场检具格式。请选含 SN、TimeStamp、Name、Nominal 的横向数据表。','所选工作表未识别为三坐标格式。请选含 Item、Check Item、Nominal 及工件编号的结果表。','这两个文件都识别为现场检具报告，请各导入一份。','这两个文件都识别为三坐标报告，请各导入一份。','无法读取本地样式，请刷新工具页面后重试。','无法读取本地组件，请刷新工具页面后重试。']);
   function safeError(error) { const message = error?.message; return errors.has(message) ? message : '文件或组件无法读取，请检查格式、完整性和访问权限后重试。'; }
-  global.ToolPrivacy = Object.freeze({ alias, engineering, sn, mode, rawWeld, compareResult, safeError });
+  global.ToolPrivacy = Object.freeze({ anonymizeNames, nameNotice, alias, engineering, sn, mode, rawWeld, compareResult, safeError });
 })(typeof window !== 'undefined' ? window : globalThis);

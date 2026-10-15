@@ -48,6 +48,7 @@
     "scanTimeoutMs": 180000
   },
   "privacy": {
+    "productNames": "original",
     "terms": []
   }
 }

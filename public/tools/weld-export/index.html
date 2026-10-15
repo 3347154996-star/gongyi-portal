@@ -27,7 +27,7 @@
     <button class="sec" id="jumpToResults" type="button" hidden>查看参数结果 ↓</button>
     <span class="hint" id="impMsg" role="status" aria-live="polite">尚未导入</span>
   </div>
-  <p class="hint">名称保密显示：程序、信号和自由文本使用稳定代号；纯数字编号及工程点位保留。导出与复制采用同一代号，原始名称不写入结果。代号仅用于此工具，与门户产品目录独立。</p>
+  <p class="hint" id="namePolicy">按原文件显示名称，搜索、复制和导出保留原名称。旧脱敏结果若只保存了代号，将继续显示已有代号；重新导入原文件可显示原名称。</p>
   <div id="taskInfo" class="hint"></div><div class="tool-scope"><p>支持 ABB RAPID 的 .mod / .sys / .txt；单文件最多 16 MB、合计最多 64 MB。</p><p>保留原工具的 welddata 换算规则。结果用于核对与导出，实际焊机单位和程序状态须结合设备配置确认。</p></div>
 </div>
 
@@ -42,8 +42,8 @@
   <div class="row">
     <label for="taskSel">任务：</label>
     <select id="taskSel"><option value="">全部</option></select>
-    <label for="kw" style="margin-left:8px;">代号或焊点编号：</label>
-    <input type="text" aria-label="程序代号、焊接数据代号或焊点编号" id="kw" placeholder="代号 / W42 / 焊点编号（留空＝全部）">
+    <label for="kw" style="margin-left:8px;">名称或焊点编号：</label>
+    <input type="text" aria-label="程序名称、焊接数据名称或焊点编号" id="kw" placeholder="程序名 / 数据名 / W42（留空＝全部）">
     <label style="margin-left:8px;"><input type="checkbox" id="onlyMiss"> 只看未取到参数的段</label>
     <label style="margin-left:8px;"><input type="checkbox" id="showAll"> 显示全部（含被注释/未引用）</label>
     <span class="hint">默认只检索正在使用（主程序启用、未被 ! 备注）的焊接程序</span>
@@ -71,7 +71,7 @@
   <ol style="line-height:1.9;margin:0 0 6px;">
     <li>点「选择文件夹」导入机器人备份（含 RAPID 的整个备份文件夹即可）。</li>
     <li>工具自动按 TASK 分组，<b>默认只检索「正在使用」的焊接程序</b>（主程序启用、未被 ! 备注），列出其焊接段参数；勾选「显示全部」可查看被注释/未引用的程序。</li>
-    <li>用「筛选」按 任务 / 代号或焊点编号 / 主程序状态 缩小范围（可选）。</li>
+    <li>用「筛选」按 任务 / 名称或焊点编号 / 主程序状态 缩小范围（可选）。</li>
     <li>点「导出 Excel / CSV」或「复制到剪贴板」取得结果（导出内容＝当前视图）。</li>
   </ol>
   <h3 style="margin:12px 0 8px;color:#1F3864;font-size:14px;">二、解析规则</h3>

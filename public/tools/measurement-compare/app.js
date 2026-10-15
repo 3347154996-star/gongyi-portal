@@ -9,6 +9,7 @@ const state={vision:null,cmm:null,data:null,threshold:.2,mode:'point',busy:false
 let importQueue=Promise.resolve();
 const E=window.MeasureCompareEngine;
 const privacy=window.ToolPrivacy;
+document.getElementById('namePolicy').textContent=privacy.nameNotice;
 function setStatus(message,kind=''){ $('status').textContent=message;$('status').className='message'+(kind?' '+kind:''); }
 function showResults(show){$('result').hidden=!show;$('empty-state').hidden=show;}
 function hideOldResult(){state.data=null;showResults(false);$('download').disabled=true;}
