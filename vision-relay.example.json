@@ -1,0 +1,6 @@
+{
+  "sourceFile": "\\\\COLLECTOR_HOST\\VisionData\\vision.json",
+  "destinationFile": "\\\\COMPANY_SHARE\\QUALITY\\vision.json",
+  "intervalSeconds": 30,
+  "timeoutSeconds": 60
+}
