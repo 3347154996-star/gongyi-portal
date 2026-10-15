@@ -9,15 +9,18 @@
   <link rel="stylesheet" href="inventory.css?v=20261015">
   <link rel="stylesheet" href="vision.css?v=20261015">
   <link rel="stylesheet" href="tools.css?v=20261015">
+  <link rel="stylesheet" href="penetration.css?v=20261016">
   <link rel="stylesheet" href="portal-theme.css?v=20261015">
   <script src="vendor/jsQR.js" defer></script>
   <script src="vendor/qrcode.js" defer></script>
   <script src="vendor/qrcode_UTF8.js" defer></script>
   <script src="workbench-utils.js?v=20261015" defer></script>
+  <script src="company-calendar.js?v=20261016" defer></script>
   <script src="inventory.js?v=20261015" defer></script>
   <script src="vision.js?v=20261015" defer></script>
   <script src="portal-state.js?v=20261015" defer></script>
   <script src="tools.js?v=20261015" defer></script>
+  <script src="penetration.js?v=20261016" defer></script>
   <script src="app.js?v=20261015" defer></script>
 </head>
 <body class="logged-out">
@@ -36,7 +39,7 @@
   </header>
   <aside id="sidebar" class="sidebar" aria-label="业务模块">
     <p class="nav-caption">业务工作台</p>
-    <nav><a class="nav-link active" href="#weld-live" data-route="weld-live"><span class="nav-symbol" aria-hidden="true">焊</span><span>补焊点<small>实时记录 · 日期查询 · 趋势</small></span></a><a class="nav-link" href="#alarm" data-route="alarm"><span class="nav-symbol" aria-hidden="true">灯</span><span>安灯报警<small>线体 · 部门 · 处理进度</small></span></a><a class="nav-link" href="#vision" data-route="vision"><span class="nav-symbol" aria-hidden="true">检</span><span>视觉检具<small>检测结果 · 测点明细</small></span></a><a class="nav-link" href="#spares" data-route="spares"><span class="nav-symbol" aria-hidden="true">件</span><span>备件管理<small>扫码 · 入库 · 出库 · 盘点</small></span></a></nav>
+    <nav><a class="nav-link active" href="#weld-live" data-route="weld-live"><span class="nav-symbol" aria-hidden="true">焊</span><span>补焊点<small>实时记录 · 日期查询 · 趋势</small></span></a><a class="nav-link" href="#alarm" data-route="alarm"><span class="nav-symbol" aria-hidden="true">灯</span><span>安灯报警<small>线体 · 部门 · 处理进度</small></span></a><a class="nav-link" href="#vision" data-route="vision"><span class="nav-symbol" aria-hidden="true">检</span><span>视觉检具<small>检测结果 · 测点明细</small></span></a><a class="nav-link" href="#penetration" data-route="penetration"><span class="nav-symbol" aria-hidden="true">熔</span><span>熔深合格率<small>公司周 · 月度 · 产品代号</small></span></a><a class="nav-link" href="#spares" data-route="spares"><span class="nav-symbol" aria-hidden="true">件</span><span>备件管理<small>扫码 · 入库 · 出库 · 盘点</small></span></a></nav>
     <p class="nav-caption nav-tools-caption">工艺工具</p>
     <nav aria-label="工艺工具"><a class="nav-link" href="#tools" data-route="tools"><span class="nav-symbol" aria-hidden="true">具</span><span>工具中心<small>焊接参数 · 检测对比</small></span></a></nav>
     <div class="sidebar-note"><strong>工艺业务 · 操作留痕</strong><p>公司业务数据与本地工具，统一工作入口。</p><span id="accountLabel">尚未登录</span></div>
@@ -46,7 +49,9 @@
     <div class="container">
       <div class="page-heading"><div><p class="eyebrow">工艺业务 / <span id="breadcrumb">补焊点</span></p><h1 id="pageTitle">补焊点</h1><p id="pageDescription" class="muted">查看实时缺陷记录，也可按日期、产品和线体查询趋势。</p></div><a id="sourceLink" class="text-link" href="#" target="_blank" rel="noopener noreferrer" hidden>打开原系统 ↗</a></div>
       <div id="moduleNotice" class="notice info">这里显示焊接不合格日志。记录数不等于产品数，也不能据此确认已完成补焊。</div>
+      <section id="qualityOverviewEntry" class="quality-overview-entry" aria-label="质量报表入口"><span class="quality-entry-mark" aria-hidden="true">熔</span><div><strong>熔深合格率</strong><p>按公司周、月份和产品代号查看检测统计。</p></div><a href="#penetration">进入报表 →</a></section>
       <section id="toolsWorkbench" aria-label="工艺工具中心" hidden></section>
+      <section id="penetrationWorkbench" class="penetration-workbench" aria-label="熔深合格率工作台" hidden></section>
       <div id="sourceStatusLine" class="source-status-line" role="status"><span class="source-status-dot" aria-hidden="true"></span><span id="sourceStatusText">正在检查数据源状态…</span></div>
       <section class="filter-panel" aria-label="查询条件">
         <form id="queryForm" class="query-form">
@@ -55,7 +60,7 @@
           <label class="field" id="endField"><span>结束日期</span><input id="endDate" type="date" required></label>
           <label class="field" id="categoryField" hidden><span>备件类别</span><select id="categoryFilter"><option value="all">全部备件</option><option value="pin">定位销</option><option value="cylinder">伸缩气缸</option></select></label>
           <label class="field" id="stockField" hidden><span>库存状态</span><select id="stockFilter"><option value="all">全部库存状态</option><option value="out">缺货</option><option value="low">低库存</option><option value="normal">充足</option><option value="unknown">待核实</option></select></label>
-          <label class="field" id="materialField"><span>物料</span><select id="materialFilter"><option value="all">全部物料</option></select></label>
+          <label class="field" id="materialField"><span>物料</span><select id="materialFilter"><option value="all">全部产品代号</option></select></label>
           <label class="field" id="weldLineField"><span>线体</span><select id="weldLineFilter"><option value="all">全部线体</option></select></label>
           <div class="field defect-field" id="defectField"><span>缺陷类型</span><details id="defectPicker" class="defect-picker"><summary><span id="defectSelectionLabel">全部缺陷</span><span aria-hidden="true">⌄</span></summary><div class="defect-picker-panel"><div class="defect-picker-heading"><strong>选择缺陷类型</strong><span>直接勾选，可同时选择多项</span></div><div class="defect-shortcuts"><button id="defectAll" type="button">全部缺陷</button><button id="defectWeld" type="button">焊偏＋焊穿</button><button id="defectClear" type="button">清空并恢复全部</button></div><div id="defectOptions" class="defect-options"><p>读取数据后显示可选缺陷。</p></div><div class="defect-picker-footer"><span id="defectDraftHint" aria-live="polite">全部缺陷</span><button id="applyDefects" class="button primary" type="button">应用筛选</button></div></div></details><div id="defectChips" class="defect-chips" aria-label="已选择缺陷"></div></div>
           <label class="field" id="alarmStatusField" hidden><span>报警状态</span><select id="alarmStatusFilter"><option value="all">全部状态</option></select></label>
@@ -67,6 +72,7 @@
         <div id="weldDrillFilters" class="weld-drill-filters" aria-label="缺陷明细定位条件" hidden></div>
         <div id="alarmFilterActions" class="alarm-filter-actions" hidden><details id="alarmMoreFilters" class="alarm-more-filters"><summary id="alarmMoreLabel">更多筛选</summary><div id="alarmMoreFields" class="alarm-more-fields"></div></details></div>
         <div id="quickRanges" class="quick-ranges" role="group" aria-label="报警快捷日期" hidden><span>快捷日期</span><button type="button" data-days="1">今日</button><button type="button" data-days="7">近 7 天</button><button type="button" data-days="30">近 30 天</button></div>
+        <div id="companyWeekPicker" class="company-week-picker" role="group" aria-label="公司周查询"><label><span>公司周</span><select id="companyWeekYear" aria-label="公司周年份"></select><select id="companyWeekSelect" aria-label="公司周次"></select></label><button id="companyWeekPrev" class="button" type="button">← 前一周</button><button id="companyWeekApply" class="button" type="button">按周查询</button><button id="companyWeekNext" class="button" type="button">后一周 →</button><small>周五至周四；2026/10/02–10/08 为 KW41。跨年暂按含 1 月 1 日的周为 KW01。</small></div>
         <div id="refreshRow" class="refresh-row"><div class="refresh-controls"><button id="refreshButton" class="button" type="button">立即刷新</button><label id="intervalField" class="inline-field"><span>轮询间隔</span><select id="pollInterval" aria-label="自动刷新间隔"><option value="15">15 秒</option><option value="30" selected>30 秒</option><option value="60">60 秒</option></select></label><button id="pollButton" class="button" type="button" aria-pressed="false">启动自动刷新</button></div><span id="pollStatus" class="muted" role="status">默认每 30 秒自动更新，可随时暂停</span></div>
         <p id="queryError" class="form-error" role="alert" hidden></p>
       </section>

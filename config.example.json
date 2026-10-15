@@ -12,10 +12,20 @@
   "maxPages": 50,
   "language": "0",
   "materialGroups": {
-    "front": ["FRONT_PRIMARY", "FRONT_SECONDARY"],
-    "rear": ["REAR_PRIMARY", "REAR_SECONDARY"]
+    "front": [
+      "FRONT_PRIMARY",
+      "FRONT_SECONDARY"
+    ],
+    "rear": [
+      "REAR_PRIMARY",
+      "REAR_SECONDARY"
+    ]
   },
-  "weldLineFields": ["productionLine", "lineName", "line"],
+  "weldLineFields": [
+    "productionLine",
+    "lineName",
+    "line"
+  ],
   "weldLineRules": [],
   "weldMaterialNames": [],
   "alarmDepartmentRules": [],
@@ -25,6 +35,19 @@
     "profile": "power-mold",
     "warehouseKey": "gongyi-spares",
     "label": "工艺部备件库",
-    "writes": { "inbound": false, "outbound": false, "adjust": false }
+    "writes": {
+      "inbound": false,
+      "outbound": false,
+      "adjust": false
+    }
+  },
+  "penetration": {
+    "directory": "",
+    "year": 2026,
+    "pollIntervalSeconds": 3600,
+    "scanTimeoutMs": 180000
+  },
+  "privacy": {
+    "terms": []
   }
 }

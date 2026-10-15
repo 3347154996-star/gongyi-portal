@@ -8,14 +8,15 @@ const offlineNotice=extra=>`<aside class="offline-notice ${extra||''}" aria-labe
 const state={vision:null,cmm:null,data:null,threshold:.2,mode:'point',busy:false,generation:0,saved:false};
 let importQueue=Promise.resolve();
 const E=window.MeasureCompareEngine;
+const privacy=window.ToolPrivacy;
 function setStatus(message,kind=''){ $('status').textContent=message;$('status').className='message'+(kind?' '+kind:''); }
 function showResults(show){$('result').hidden=!show;$('empty-state').hidden=show;}
 function hideOldResult(){state.data=null;showResults(false);$('download').disabled=true;}
 function sheetNames(info,type){const values=info[type+'Sheets']||[];return values.map(s=>typeof s==='string'?s:s.name||s.sheetName).filter(Boolean);}
 function preferred(names){return names.find(s=>s.trim()==='11')||names.find(s=>s.toUpperCase()==='SUMMARY')||names[0];}
-function renderSlot(type){const v=state[type];$(type+'-name').textContent=v?v.name:'尚未导入';$(type+'-drop').classList.toggle('ready',!!v);$(type+'-sheet-row').hidden=!v;if(v){$(type+'-sheet').innerHTML=v.sheets.map(s=>`<option value="${esc(s)}">${esc(s.trim())}</option>`).join('');$(type+'-sheet').value=v.sheet;}}
+function renderSlot(type){const v=state[type];$(type+'-name').textContent=v?privacy.alias('文件',v.name):'尚未导入';$(type+'-drop').classList.toggle('ready',!!v);$(type+'-sheet-row').hidden=!v;if(v){$(type+'-sheet').innerHTML=v.sheets.map((s,i)=>`<option value="${i}">${esc(privacy.alias('工作表',s))}</option>`).join('');$(type+'-sheet').value=String(v.sheets.indexOf(v.sheet));}}
 function reset(){state.generation++;state.vision=null;state.cmm=null;state.data=null;state.saved=false;state.busy=false;state.mode='point';$('vision-file').value='';$('cmm-file').value='';$('point-search').value='';$('threshold').value='0.2';state.threshold=.2;$('only-exceed').checked=false;$('saved-banner').hidden=true;$('new-import').hidden=true;$('import-card').hidden=false;renderSlot('vision');renderSlot('cmm');showResults(false);setStatus('请导入现场检具报告和三坐标报告。');}
-function describeError(error){return error&&error.message?error.message:String(error);}
+function describeError(error){return privacy.safeError(error);}
 function importFiles(fileList,hint){const files=Array.from(fileList||[]),epoch=state.generation;importQueue=importQueue.then(()=>epoch===state.generation?doImportFiles(files,hint):undefined);return importQueue;}
 async function doImportFiles(fileList,hint){
  const files=Array.from(fileList||[]);if(!files.length)return;
@@ -31,7 +32,7 @@ async function doImportFiles(fileList,hint){
      if(file.size>64*1024*1024)throw new Error('文件超过 64 MB，请导出所需日期范围后再导入。');
      const wb=await E.readWorkbook(await file.arrayBuffer(),file.name);if(generation!==state.generation)return;
      const info=E.inspectWorkbook(wb),vs=sheetNames(info,'vision'),cs=sheetNames(info,'cmm');
-     let type;if(vs.length&&!cs.length)type='vision';else if(cs.length&&!vs.length)type='cmm';else if(hint&&sheetNames(info,hint).length)type=hint;else if(vs.length&&cs.length)throw new Error(file.name+' 同时包含两种报表，请分别放入对应的导入框。');else throw new Error(file.name+' 未识别为当前现场检具或三坐标模板，请检查表头与工作表。');
+     let type;if(vs.length&&!cs.length)type='vision';else if(cs.length&&!vs.length)type='cmm';else if(hint&&sheetNames(info,hint).length)type=hint;else if(vs.length&&cs.length)throw new Error('文件同时包含两种报表，请分别放入对应的导入框。');else throw new Error('未识别为当前现场检具或三坐标模板，请检查表头与工作表。');
      if(staged.some(v=>v.type===type))throw new Error('这两个文件都识别为'+(type==='vision'?'现场检具':'三坐标')+'报告，请各导入一份。');
      const sheets=sheetNames(info,type);staged.push({type,wb,name:file.name,sheets,sheet:preferred(sheets)});
    }
@@ -45,14 +46,14 @@ function normalize(raw){
  const findMeta=p=>pairs.find(x=>x.pair_id===p.pair_id)||pairs.find(x=>x.sn===p.sn&&x.vision_time===p.vision_time);
  const items=(raw.items||[]).map(m=>({...m,key:m.key||m.point+'_'+m.axis,pairs:(m.pairs||[]).filter(p=>finite(p.vision)&&finite(p.cmm)&&finite(p.diff)).map(p=>({...findMeta(p),...p,pair_id:p.pair_id||findMeta(p)?.pair_id,short_sn:p.short_sn||String(p.sn||'').slice(-9)}))})).filter(m=>m.pairs.length);
  if(!pairs.length){const found=new Map();for(const m of items)for(const p of m.pairs)found.set(p.pair_id||p.sn+'|'+p.vision_time,p);pairs.push(...found.values());}
- return {...raw,items,pairs,source_names:{vision:state.vision?.name||raw.source_names?.vision||'',cmm:state.cmm?.name||raw.source_names?.cmm||''},source_sheets:{vision:state.vision?.sheet||raw.source_sheets?.vision||'',cmm:state.cmm?.sheet||raw.source_sheets?.cmm||''}};
+ return privacy.compareResult({...raw,items,pairs,source_names:{vision:state.vision?.name||raw.source_names?.vision||'',cmm:state.cmm?.name||raw.source_names?.cmm||''},source_sheets:{vision:state.vision?.sheet||raw.source_sheets?.vision||'',cmm:state.cmm?.sheet||raw.source_sheets?.cmm||''}});
 }
 function runComparison(){
  hideOldResult();if(!state.vision||!state.cmm){setStatus('已导入'+(state.vision?'现场检具':'三坐标')+'报告，请再导入'+(state.vision?'三坐标':'现场检具')+'报告。');return;}
  try{const raw=E.compare(state.vision.wb,state.vision.sheet,state.cmm.wb,state.cmm.sheet);state.data=normalize(raw);renderAll();window.PortalToolBridge?.notify('measurement-compare',{fileCount:2,pairCount:state.data.pairs.length,itemCount:state.data.items.length});const d=state.data;if(!d.items.length){setStatus('已读取两份报告，但没有可以比较的数据。请查看匹配情况。','error');}else setStatus('比对完成：匹配'+new Set(d.pairs.map(p=>p.sn)).size+'个工件编号，'+d.items.length+'个点位方向。','success');}
  catch(error){setStatus('无法完成比对：'+describeError(error),'error');}
 }
-function pointLabel(m){const location=String(m.cmm_label||'').replace(/^\d+(?:\.0)?\s*/,'');return m.point+'点 '+m.axis+(location&&!location.startsWith('点位')?'　'+location:'');}
+function pointLabel(m){return m.point+'点 '+m.axis;}
 function sampleLabel(p){return (p.vision_time||p.cmm_date||'日期未记录')+'　'+(p.short_sn||p.sn)+(p.repeat_count>1?'　第'+p.repeat_index+'次':'');}
 function stats(m){const a=m.pairs.map(p=>p.diff),min=Math.min(...a),max=Math.max(...a);return {n:a.length,min,max,mean:a.reduce((x,y)=>x+y,0)/a.length,maxAbs:Math.max(...a.map(Math.abs)),spread:max-min,count:a.filter(exceed).length};}
 function exceed(v){return finite(v)&&Math.abs(v)>state.threshold+1e-12;}
@@ -104,7 +105,9 @@ async function download(){
  try {
   const root=document.documentElement.cloneNode(true);
   root.querySelectorAll('[data-portal-return]').forEach(link=>link.remove());
-  root.querySelector('#saved-result').textContent=JSON.stringify({data:state.data,threshold:state.threshold,saved_at:new Date().toLocaleString('zh-CN')}).replace(/</g,'\\u003c');
+  for(const input of root.querySelectorAll('input[type=\"file\"],input[type=\"search\"]')){input.value='';input.removeAttribute('value');}
+  for(const type of ['vision','cmm']){root.querySelector('#'+type+'-name').textContent='尚未导入';root.querySelector('#'+type+'-sheet').innerHTML='';}
+  root.querySelector('#saved-result').textContent=JSON.stringify({data:privacy.compareResult(state.data),threshold:state.threshold,saved_at:new Date().toLocaleString('zh-CN')}).replace(/</g,'\\u003c');
   // Bundle static, same-origin resources so the exported report still works offline.
   // Only GETs for application assets are made; no report content is sent anywhere.
   for(const link of root.querySelectorAll('link[rel="stylesheet"][href]')){
@@ -122,11 +125,11 @@ async function download(){
   a.href=url;a.download='检具与三坐标_对比结果_'+new Date().toISOString().slice(0,10)+'.html';a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);
  }catch(error){$('saved-banner').hidden=false;$('saved-banner').textContent='保存失败：'+describeError(error);}finally{button.disabled=false;button.textContent=label;}
 }
-for(const type of ['vision','cmm']){const drop=$(type+'-drop'),input=$(type+'-file');drop.addEventListener('click',e=>{if(e.target.closest('select,input,label'))return;input.click();});drop.addEventListener('keydown',e=>{if(e.target===drop&&(e.key==='Enter'||e.key===' ')){e.preventDefault();input.click();}});input.addEventListener('change',()=>{importFiles(input.files,type);input.value='';});drop.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();drop.classList.add('dragging');});drop.addEventListener('dragleave',()=>drop.classList.remove('dragging'));drop.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();drop.classList.remove('dragging');importFiles(e.dataTransfer.files,type);});$(type+'-sheet').addEventListener('change',e=>{if(state[type]){state[type].sheet=e.target.value;runComparison();}});}
+for(const type of ['vision','cmm']){const drop=$(type+'-drop'),input=$(type+'-file');drop.addEventListener('click',e=>{if(e.target.closest('select,input,label'))return;input.click();});drop.addEventListener('keydown',e=>{if(e.target===drop&&(e.key==='Enter'||e.key===' ')){e.preventDefault();input.click();}});input.addEventListener('change',()=>{importFiles(input.files,type);input.value='';});drop.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();drop.classList.add('dragging');});drop.addEventListener('dragleave',()=>drop.classList.remove('dragging'));drop.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();drop.classList.remove('dragging');importFiles(e.dataTransfer.files,type);});$(type+'-sheet').addEventListener('change',e=>{if(state[type]){state[type].sheet=state[type].sheets[Number(e.target.value)];runComparison();}});}
 $('import-card').addEventListener('dragover',e=>e.preventDefault());$('import-card').addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();importFiles(e.dataTransfer.files);});document.addEventListener('dragover',e=>{if(e.dataTransfer?.types.includes('Files'))e.preventDefault();});document.addEventListener('drop',e=>{if(e.dataTransfer?.files.length&&!e.defaultPrevented){e.preventDefault();importFiles(e.dataTransfer.files);}});
 $('reset').addEventListener('click',reset);$('new-import').addEventListener('click',reset);$('tab-point').addEventListener('click',()=>mode('point'));$('tab-sample').addEventListener('click',()=>mode('sample'));$('point-select').addEventListener('change',renderPoint);$('sample-select').addEventListener('change',renderSample);$('only-exceed').addEventListener('change',()=>{renderPoint();renderSample();});$('threshold').addEventListener('change',()=>{const v=Number($('threshold').value);if(!Number.isFinite(v)||v<=0){$('threshold').setCustomValidity('请输入大于0的数值。');$('threshold').reportValidity();return;}$('threshold').setCustomValidity('');state.threshold=v;renderPoint();renderSample();});$('point-search').addEventListener('input',()=>{const q=$('point-search').value.trim().toLowerCase();const options=Array.from($('point-select').options);for(const o of options)o.hidden=q?!(/^\d+$/.test(q)?o.value.split('_')[0]===q:o.textContent.toLowerCase().includes(q)):false;const found=options.find(o=>!o.hidden);if(found){$('point-select').value=found.value;renderPoint();}else $('point-content').innerHTML='<p class="note">没有找到符合条件的点位。</p>';});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-point]');if(b){$('point-search').value='';for(const o of $('point-select').options)o.hidden=false;$('point-select').value=b.dataset.point;mode('point');renderPoint();$('result').scrollIntoView({behavior:'smooth'});}});$('download').addEventListener('click',download);
-try{const saved=JSON.parse($('saved-result').textContent);if(saved?.data){state.data=saved.data;state.threshold=finite(saved.threshold)&&saved.threshold>0?saved.threshold:.2;$('threshold').value=state.threshold;state.saved=true;$('import-card').hidden=true;$('saved-banner').hidden=false;$('saved-banner').textContent='已保存的对比结果 · '+(saved.saved_at||'');$('new-import').hidden=false;renderAll();}else reset();}catch(error){reset();setStatus('已保存的数据无法读取，请重新导入两份报告。','error');}
-window.MeasureCompareTool={version:'1.0.0',getResult:()=>state.data,importFiles,reset};
+try{const saved=JSON.parse($('saved-result').textContent);if(saved?.data){state.data=privacy.compareResult(saved.data);state.threshold=finite(saved.threshold)&&saved.threshold>0?saved.threshold:.2;$('threshold').value=state.threshold;state.saved=true;$('import-card').hidden=true;$('saved-banner').hidden=false;const savedAt=/^[\d\s/:.年月日-]+$/.test(String(saved.saved_at||''))?String(saved.saved_at):'';$('saved-banner').textContent='已保存的对比结果 · '+savedAt;$('saved-result').textContent=JSON.stringify({data:state.data,threshold:state.threshold,saved_at:savedAt}).replace(/</g,'\\u003c');$('new-import').hidden=false;renderAll();}else reset();}catch(error){reset();setStatus('已保存的数据无法读取，请重新导入两份报告。','error');}
+window.MeasureCompareTool={version:'1.0.0',getResult:()=>state.data?privacy.compareResult(state.data):null,importFiles,reset};
 window.PortalToolBridge?.register('measurement-compare',window.MeasureCompareTool);
 })();

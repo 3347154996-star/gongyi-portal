@@ -1,5 +1,8 @@
 
 'use strict';
+const privacy=window.ToolPrivacy;
+const procName=value=>privacy.alias('程序',value);
+const dataName=(kind,value)=>privacy.engineering(kind,value);
 let FILES=[];
 let importGeneration=0;
 const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -88,9 +91,9 @@ async function collect(files){
     PROCS.sort((a,b)=>a.task.localeCompare(b.task)||a.file.localeCompare(b.file)||a.s-b.s);
     afterImport(selected.length);
     window.PortalToolBridge?.notify('weld-export',{fileCount:selected.length,rowCount:LAST?.length||0});
-  } catch(error){if(generation!==importGeneration)return;resetImport();setImp('导入失败：'+(error.message||'无法读取文件，请重新选择。'));}
+  } catch(error){if(generation!==importGeneration)return;resetImport();setImp('导入失败：'+privacy.safeError(error));}
 }
-function readFiles(list){return collect(list);}
+async function readFiles(list){try{return await collect(list);}finally{document.getElementById('dirInput').value='';document.getElementById('fileInput').value='';}}
 function readFilesRaw(files){return collect(files);}
 function resetImport(){
   importGeneration++;FILES=[];PROCS=[];DECL=Object.create(null);LAST=[];MAIN=Object.create(null);MODES=Object.create(null);showAll=false;
@@ -120,7 +123,7 @@ function renderProcList(){
   const t=curTask();const list=PROCS.filter(p=>(!t||p.task===t)&&(showAll||mainStatus(p.name,p.task)==='call'));
   if(!list.length){el.innerHTML='<div class="hint">未解析到正在使用的焊接程序</div>';return;}
   el.innerHTML='<div class="hint" style="margin-bottom:4px;">焊接过程（点卡片按该程序名筛选）：</div>'+
-   list.map(p=>{const i=PROCS.indexOf(p);const c=(p.task==='TASK2'?'t2':'');return '<button type="button" class="tag '+c+'" data-proc-index="'+i+'">['+esc(p.task)+'] '+esc(p.name)+' <span style="opacity:.6">('+p.segs.length+'段)</span></button>';}).join('');
+   list.map(p=>{const i=PROCS.indexOf(p);const c=(p.task==='TASK2'?'t2':'');return '<button type="button" class="tag '+c+'" data-proc-index="'+i+'">['+esc(p.task)+'] '+esc(procName(p.name))+' <span style="opacity:.6">('+p.segs.length+'段)</span></button>';}).join('');
 }
 document.getElementById('kw').addEventListener('input',applyFilter);
 document.getElementById('onlyMiss').addEventListener('change',applyFilter);
@@ -151,9 +154,9 @@ function renderCallOverview(){
     h+='<table style="width:auto;min-width:480px;box-shadow:none;"><thead><tr><th>触发信号</th><th>焊接程序</th><th>状态</th><th>段数</th><th>操作</th></tr></thead><tbody>';
     rows.filter(r=>r.task===t).sort((a,b)=>a.sig.localeCompare(b.sig)).forEach(r=>{
       const msTxt=MS_TXT[r.status];const cls=(r.status==='call'?'msC':(r.status==='cmt'?'msM':'msN'));
-      h+='<tr><td class="mono">'+(r.sig||'—')+'</td><td class="l procname">'+r.name+'</td>'+
+      h+='<tr><td class="mono">'+(esc(privacy.alias('信号',r.sig))||'—')+'</td><td class="l procname">'+esc(procName(r.name))+'</td>'+
          '<td><span class="'+cls+'">'+msTxt+'</span></td><td>'+r.segs+'</td>'+
-         '<td><button class="sec" style="padding:3px 10px;font-size:12px;" data-task="'+esc(r.task)+'" data-proc="'+esc(r.name)+'">调出参数 →</button></td></tr>';
+         '<td><button class="sec" style="padding:3px 10px;font-size:12px;" data-call-index="'+PROCS.findIndex(p=>p.task===r.task&&p.name===r.name)+'">调出参数 →</button></td></tr>';
     });
     h+='</tbody></table></div>';
   });
@@ -162,7 +165,7 @@ function renderCallOverview(){
 function pickByName(task,name){
   document.getElementById('taskSel').value=task;
   showAll=true; document.getElementById('showAll').checked=true;
-  document.getElementById('kw').value=name;
+  document.getElementById('kw').value=procName(name);
   renderProcList();applyFilter();
   document.getElementById('resTable').scrollIntoView({behavior:'smooth',block:'start'});
 }
@@ -183,11 +186,11 @@ function applyFilter(){
   renderProcList();
   let rows=computeRows();
   const kw=document.getElementById('kw').value.trim().toLowerCase();
-  if(kw) rows=rows.filter(r=>[r.proc,r.weld,r.label,r.seam].some(x=>String(x).toLowerCase().includes(kw)));
+  if(kw) rows=rows.filter(r=>[procName(r.proc),dataName('焊接数据',r.weld),dataName('标签',r.label),dataName('焊缝数据',r.seam)].some(x=>String(x).toLowerCase().includes(kw)));
   showAll=document.getElementById('showAll').checked;
   if(document.getElementById('onlyMiss').checked) rows=rows.filter(r=>!r.wd);
   const t=curTask();
-  document.getElementById('autoHint').textContent=(t?('任务 '+t+'：'):'全部任务：')+(kw?('关键词“'+document.getElementById('kw').value.trim()+'” '):'')+'已列出 '+rows.length+' 个焊接段'+(!rows.length&&!showAll?'。请确认已导入 MainModule.mod，或勾选“显示全部”查看未启用/未引用程序。':'');
+  document.getElementById('autoHint').textContent=(t?('任务 '+t+'：'):'全部任务：')+(kw?'已按关键词筛选 ':'')+'已列出 '+rows.length+' 个焊接段'+(!rows.length&&!showAll?'。请确认已导入 MainModule.mod，或勾选“显示全部”查看未启用/未引用程序。':'');
   render(rows);
 }
 function render(rows){
@@ -199,19 +202,19 @@ function render(rows){
   let h='<div class="tblwrap"><table><thead><tr>'+
     '<th rowspan="2">序号</th><th rowspan="2">任务</th><th rowspan="2">过程</th><th rowspan="2">主程序</th><th rowspan="2">触发信号</th><th rowspan="2">行号</th><th rowspan="2">!标签</th>'+
     '<th rowspan="2">焊接数据名</th><th rowspan="2">seamdata</th>'+
-    '<th class="grp" colspan="5">焊接参数（由 welddata 换算）</th><th rowspan="2">原始 welddata 声明</th></tr>'+
+    '<th class="grp" colspan="5">焊接参数（由 welddata 换算）</th><th rowspan="2">welddata 数值声明</th></tr>'+
     '<tr><th>速度(mm/s)</th><th>速度(IPM)</th><th>焊接模式</th><th>电压(V)</th><th>电流(A)</th></tr></thead><tbody>';
   rows.forEach((r,i)=>{
     const d=r.wd,sp=(d&&d.speed!=null)?d.speed:null;
     const msTxt=MS_TXT[r.ms]||''; const msCls=(r.ms==='call'?'msC':(r.ms==='cmt'?'msM':'msN'));
-    h+='<tr><td>'+(i+1)+'</td><td class="mono">'+r.task+'</td><td class="l procname">'+r.proc+'</td><td><span class="'+msCls+'">'+msTxt+'</span></td><td class="mono">'+(r.trig||'—')+'</td><td>'+r.segline+'</td>'+
-       '<td class="mono">'+vz(r.label)+'</td><td>'+vz(r.weld)+'</td><td>'+vz(r.seam)+'</td>'+
+    h+='<tr><td>'+(i+1)+'</td><td class="mono">'+r.task+'</td><td class="l procname">'+esc(procName(r.proc))+'</td><td><span class="'+msCls+'">'+msTxt+'</span></td><td class="mono">'+(esc(privacy.alias('信号',r.trig))||'—')+'</td><td>'+r.segline+'</td>'+
+       '<td class="mono">'+vz(dataName('标签',r.label))+'</td><td>'+vz(dataName('焊接数据',r.weld))+'</td><td>'+vz(dataName('焊缝数据',r.seam))+'</td>'+
        '<td>'+(sp!=null?rnd(sp,4):'—')+'</td>'+
        '<td><b>'+(sp!=null?rnd(sp*SPD_K,2):'—')+'</b></td>'+
-       '<td>'+(d&&d.mode!=null?('<span class="pill">'+d.mode+(MODES[d.mode]?(' '+esc(MODES[d.mode])):'')+'</span>'):'—')+'</td>'+
+       '<td>'+(d&&d.mode!=null?('<span class="pill">'+d.mode+(MODES[d.mode]?(' '+esc(privacy.mode(MODES[d.mode]))):'')+'</span>'):'—')+'</td>'+
        '<td>'+(d&&d.volt!=null?vz(d.volt):'—')+'</td>'+
        '<td><b>'+(d&&d.current!=null?rnd(d.current*CUR_K,2):'—')+'</b></td>'+
-       '<td class="raw">'+(d?esc(d.raw):'<span class="waitc">未在同一任务内找到该 welddata 声明</span>')+'</td></tr>';
+       '<td class="raw">'+(d?esc(privacy.rawWeld(d.raw)):'<span class="waitc">未在同一任务内找到该 welddata 声明</span>')+'</td></tr>';
   });
   if(!rows.length) h+='<tr><td colspan="14" class="empty">无匹配</td></tr>';
   h+='</tbody></table></div>';
@@ -234,24 +237,24 @@ function buildResult(matched){
   LAST=rows;
   const totSeg=rows.length, wdOk=rows.filter(r=>r.wd).length;
   document.getElementById('resHead').innerHTML='<div>匹配到 '+matched.length+' 个过程：'+
-    matched.map(p=>'<span class="procname">['+p.task+'] '+p.name+'</span> <span class="hint">('+p.segs.length+'段)</span>').join('、')+'</div>';
+    matched.map(p=>'<span class="procname">['+p.task+'] '+esc(procName(p.name))+'</span> <span class="hint">('+p.segs.length+'段)</span>').join('、')+'</div>';
   document.getElementById('resStats').innerHTML=`<div class="stat">过程数 <b>${matched.length}</b></div><div class="stat">焊接段 <b>${totSeg}</b></div><div class="stat">取到 welddata <b>${wdOk}</b></div><div class="stat">未取到 <b style="color:#b00020">${totSeg-wdOk}</b></div>`;
   let h='<div class="tblwrap"><table><thead><tr>'+
     '<th rowspan="2">序号</th><th rowspan="2">任务</th><th rowspan="2">过程</th><th rowspan="2">主程序</th><th rowspan="2">触发信号</th><th rowspan="2">行号</th><th rowspan="2">!标签</th>'+
     '<th rowspan="2">焊接数据名</th><th rowspan="2">seamdata</th>'+
-    '<th class="grp" colspan="5">焊接参数（由 welddata 换算）</th><th rowspan="2">原始 welddata 声明</th></tr>'+
+    '<th class="grp" colspan="5">焊接参数（由 welddata 换算）</th><th rowspan="2">welddata 数值声明</th></tr>'+
     '<tr><th>速度(mm/s)</th><th>速度(IPM)</th><th>焊接模式</th><th>电压(V)</th><th>电流(A)</th></tr></thead><tbody>';
   rows.forEach((r,i)=>{
     const d=r.wd,sp=(d&&d.speed!=null)?d.speed:null;
     const msTxt=MS_TXT[r.ms]||''; const msCls=(r.ms==='call'?'msC':(r.ms==='cmt'?'msM':'msN'));
-    h+='<tr><td>'+(i+1)+'</td><td class="mono">'+r.task+'</td><td class="l procname">'+r.proc+'</td><td><span class="'+msCls+'">'+msTxt+'</span></td><td class="mono">'+(r.trig||'—')+'</td><td>'+r.segline+'</td>'+
-       '<td class="mono">'+vz(r.label)+'</td><td>'+vz(r.weld)+'</td><td>'+vz(r.seam)+'</td>'+
+    h+='<tr><td>'+(i+1)+'</td><td class="mono">'+r.task+'</td><td class="l procname">'+esc(procName(r.proc))+'</td><td><span class="'+msCls+'">'+msTxt+'</span></td><td class="mono">'+(esc(privacy.alias('信号',r.trig))||'—')+'</td><td>'+r.segline+'</td>'+
+       '<td class="mono">'+vz(dataName('标签',r.label))+'</td><td>'+vz(dataName('焊接数据',r.weld))+'</td><td>'+vz(dataName('焊缝数据',r.seam))+'</td>'+
        '<td>'+(sp!=null?rnd(sp,4):'—')+'</td>'+
        '<td><b>'+(sp!=null?rnd(sp*SPD_K,2):'—')+'</b></td>'+
-       '<td>'+(d&&d.mode!=null?('<span class="pill">'+d.mode+(MODES[d.mode]?(' '+esc(MODES[d.mode])):'')+'</span>'):'—')+'</td>'+
+       '<td>'+(d&&d.mode!=null?('<span class="pill">'+d.mode+(MODES[d.mode]?(' '+esc(privacy.mode(MODES[d.mode]))):'')+'</span>'):'—')+'</td>'+
        '<td>'+(d&&d.volt!=null?vz(d.volt):'—')+'</td>'+
        '<td><b>'+(d&&d.current!=null?rnd(d.current*CUR_K,2):'—')+'</b></td>'+
-       '<td class="raw">'+(d?esc(d.raw):'<span class="waitc">未在同一任务内找到该 welddata 声明</span>')+'</td></tr>';
+       '<td class="raw">'+(d?esc(privacy.rawWeld(d.raw)):'<span class="waitc">未在同一任务内找到该 welddata 声明</span>')+'</td></tr>';
   });
   h+='</tbody></table></div>';
   document.getElementById('resTable').innerHTML=h;
@@ -259,9 +262,9 @@ function buildResult(matched){
 }
 
 // export
-const HEAD=['序号','任务','过程','主程序','触发信号','行号','!标签','焊接数据名','seamdata','速度(mm/s)','速度(IPM)','焊接模式','电压(V)','电流(A)','原始welddata'];
+const HEAD=['序号','任务','过程','主程序','触发信号','行号','焊点标签/代号','焊接数据名','seamdata','速度(mm/s)','速度(IPM)','焊接模式','电压(V)','电流(A)','welddata数值声明'];
 function exportRowsArr(list){return list.map((r,i)=>{const d=r.wd,sp=(d&&d.speed!=null)?d.speed:null;
-  return [i+1,r.task,r.proc,(MS_TXT[r.ms]||''),(r.trig||''),r.segline,r.label,r.weld,r.seam,sp!=null?rnd(sp,4):'',sp!=null?rnd(sp*SPD_K,2):'',(d&&d.mode!=null)?(d.mode+(MODES[d.mode]?(' '+MODES[d.mode]):'')):'',(d&&d.volt!=null)?d.volt:'',(d&&d.current!=null)?rnd(d.current*CUR_K,2):'',d?d.raw:''];});}
+  return [i+1,r.task,procName(r.proc),(MS_TXT[r.ms]||''),privacy.alias('信号',r.trig),r.segline,dataName('标签',r.label),dataName('焊接数据',r.weld),dataName('焊缝数据',r.seam),sp!=null?rnd(sp,4):'',sp!=null?rnd(sp*SPD_K,2):'',(d&&d.mode!=null)?(d.mode+(MODES[d.mode]?(' '+privacy.mode(MODES[d.mode])):'')):'',(d&&d.volt!=null)?d.volt:'',(d&&d.current!=null)?rnd(d.current*CUR_K,2):'',d?privacy.rawWeld(d.raw):''];});}
 function safeCell(v){return typeof v==='string'&&/^[\s]*[=+@-]/.test(v)?"'"+v:v;}
 function csvCell(v){v=String(safeCell(v)??'');return /[",\n\r\t]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
 function exportRows(){ return LAST||[]; }
@@ -301,7 +304,7 @@ async function exportExcel(){
   XLSX.utils.book_append_sheet(wb,ws2,'焊接参数');
   const base=(t?('焊接参数_'+t):'焊接参数_全部')+'_'+new Date().toISOString().slice(0,10);
   const button=document.getElementById('exportExcel');button.disabled=true;document.getElementById('expMsg').textContent='正在生成 Excel…';
-  try{await XLSX.writeFile(wb, base+'.xlsx');document.getElementById('expMsg').textContent='已导出 Excel：'+base+'.xlsx';}catch(error){document.getElementById('expMsg').textContent='导出失败：'+error.message;}finally{button.disabled=false;}
+  try{await XLSX.writeFile(wb, base+'.xlsx');document.getElementById('expMsg').textContent='已导出 Excel：'+base+'.xlsx';}catch(error){document.getElementById('expMsg').textContent='导出失败：'+privacy.safeError(error);}finally{button.disabled=false;}
 }
 function copyTSV(){ const R=exportRows(); if(!R.length){alert('没有可复制的数据（已设为仅导出启用程序）');return;}
   const tsv=[HEAD.join('\t')].concat(exportRowsArr(R).map(r=>r.map(v=>String(safeCell(v)??'').replace(/[\t\r\n]/g,' ')).join('\t'))).join('\n');
@@ -320,7 +323,7 @@ document.getElementById('fileInput').onchange=e=>readFiles(e.target.files);
 db.addEventListener('drop',async e=>{const items=[...e.dataTransfer.items||[]];const files=[];
   try{for(const it of items){const ent=it.webkitGetAsEntry&&it.webkitGetAsEntry();if(ent)await walk(ent,files,ent.name);}
   if(files.length)await readFilesRaw(files);else await readFiles(e.dataTransfer.files);}
-  catch(error){setImp('无法读取拖入的文件夹：'+(error.message||'请改用选择文件按钮。'));}});
+  catch(error){setImp('无法读取拖入的文件夹，请改用选择文件按钮。');}});
 async function walk(entry,out,path){
   if(entry.isFile){const f=await new Promise((resolve,reject)=>entry.file(resolve,reject));f._wp=path;out.push(f);}
   else if(entry.isDirectory){const reader=entry.createReader();for(;;){const entries=await new Promise((resolve,reject)=>reader.readEntries(resolve,reject));if(!entries.length)break;for(const item of entries)await walk(item,out,path+'/'+item.name);}}
@@ -328,6 +331,6 @@ async function walk(entry,out,path){
 for(const [id,handler] of [['selectFiles',()=>document.getElementById('fileInput').click()],['resetImport',resetImport],['jumpToResults',()=>{const target=document.getElementById('weldResults');target.scrollIntoView({behavior:'smooth',block:'start'});target.focus({preventScroll:true});}],['exportExcel',exportExcel],['exportCSV',exportCSV],['copyTSV',copyTSV]])document.getElementById(id).addEventListener('click',handler);
 for(const id of ['taskSel','showAll'])document.getElementById(id).addEventListener('change',applyFilter);
 document.getElementById('proclist').addEventListener('click',event=>{const target=event.target.closest('[data-proc-index]');if(target)pick(Number(target.dataset.procIndex));});
-document.getElementById('callOverview').addEventListener('click',event=>{const target=event.target.closest('[data-proc]');if(target)pickByName(target.dataset.task,target.dataset.proc);});
+document.getElementById('callOverview').addEventListener('click',event=>{const target=event.target.closest('[data-call-index]');if(target)pick(Number(target.dataset.callIndex));});
 window.WeldExportTool=Object.freeze({version:'1.0.0',importFiles:readFiles,reset:resetImport,getResult:()=>({version:'1.0.0',headers:HEAD,rows:exportRowsArr(LAST||[]),rowCount:LAST?.length||0})});
 window.PortalToolBridge?.register('weld-export',window.WeldExportTool);

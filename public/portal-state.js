@@ -38,7 +38,7 @@
     return JSON.stringify(clean(first)) === JSON.stringify(clean(second));
   }
   function createSession(storage) {
-    const key = account => 'gongyi.portal.filters.v1:' + encodeURIComponent(account);
+    const key = account => 'gongyi.portal.filters.v2:' + encodeURIComponent(account);
     const clean = (value, day) => {
       const result = {};
       if (!value || typeof value !== 'object') return result;
@@ -52,7 +52,7 @@
       return result;
     };
     return {
-      read(account, day) { if (!account) return {}; try { return clean(JSON.parse(storage.getItem(key(account))), day); } catch (_) { return {}; } },
+      read(account, day) { if (!account) return {}; try { storage.removeItem('gongyi.portal.filters.v1:'+encodeURIComponent(account));return clean(JSON.parse(storage.getItem(key(account))), day); } catch (_) { return {}; } },
       write(account, value, day) { if (!account) return; try { storage.setItem(key(account), JSON.stringify(clean(value, day))); } catch (_) { /* Storage may be disabled or full; in-memory state still works. */ } },
       clear(account) { if (!account) return; try { storage.removeItem(key(account)); } catch (_) {} }
     };

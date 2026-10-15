@@ -11,12 +11,14 @@ const {createVisionService}=require('./lib/vision.cjs');
 const {createCredentialStore}=require('./lib/credential-store.cjs');
 const {createAutoSource}=require('./lib/auto-source.cjs');
 const {createToolsService}=require('./lib/tools.cjs');
+const {createProductPrivacy}=require('./lib/product-privacy.cjs');
+const {createPenetrationService}=require('./lib/penetration.cjs');
 const ROOT=__dirname, PUBLIC=path.join(ROOT,'public');
 const SESSION_MS=8*60*60*1000;
 function loadConfig(){try{return JSON.parse(fs.readFileSync(path.join(ROOT,'config.local.json'),'utf8').replace(/^\uFEFF/,''));}catch(_){return {};}}
-function json(res,status,data,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(data));}
+function writeJson(res,status,data,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(data));}
 async function body(req){const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>2*1024*1024)throw new PortalError('上传内容超过2 MB限制。',413);chunks.push(chunk);}try{return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');}catch(_){throw new PortalError('请求格式不正确。',400);}}
-function createPortal({config=loadConfig(),source,credentialStore,autoSource,memberStore,inventoryService,visionService,root=ROOT,now=Date.now}={}){
+function createPortal({config=loadConfig(),source,credentialStore,autoSource,memberStore,inventoryService,visionService,penetrationService,root=ROOT,now=Date.now}={}){
   let connector=source,configurationError=null;
   if(!connector)try{connector=createSource(config);}catch(e){configurationError=e.message;}
   const dataService=autoSource||createAutoSource({source:connector,credentialStore:credentialStore||createCredentialStore({root}),now});
@@ -25,6 +27,9 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
   const inventory=inventoryService||createInventoryService({root,source:dataService,now,authorizeActor});
   const vision=visionService||createVisionService({root,config,now});
   const toolService=createToolsService();
+  const privacy=createProductPrivacy({root,config});
+  const json=(res,status,data,headers={})=>{try{return writeJson(res,status,privacy.protect(data),headers);}catch(_){return writeJson(res,503,{message:'产品代号配置暂不可用，已停止返回业务数据。'});}};
+  const penetration=penetrationService||createPenetrationService({root,config,privacy,now});
   async function stockCapabilities(){try{return await inventory.capabilities();}catch(_){return Object.fromEntries(['inbound','outbound','adjust'].map(key=>[key,{enabled:false,reason:'本机库存记录无法读取，请管理员核对存储文件。'}]));}}
   const tls=config.tls?.certFile&&config.tls?.keyFile?{cert:fs.readFileSync(path.resolve(root,config.tls.certFile)),key:fs.readFileSync(path.resolve(root,config.tls.keyFile))}:null;
   const configuredOrigins=new Set();
@@ -49,7 +54,7 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
       if(req.method==='GET'&&url.pathname==='/local/status'){
         const sourceStatus=dataService.status();
         const inventoryCapabilities=await stockCapabilities();
-        return json(res,200,{authenticated:Boolean(session),connected:sourceStatus.state==='ready',account:session?.account||null,name:session?.name||null,role:session?.role||null,sourceStatus,configured:Boolean(connector),modules:{weld:Boolean(connector),alarm:Boolean(connector),spares:Boolean(connector),vision:true,tools:true},writeEnabled:Object.values(inventoryCapabilities).some(value=>value.enabled),inventoryCapabilities,sourceUrls:session?links():{},environmentLabel:config.environmentLabel||'',note:configurationError});
+        return json(res,200,{authenticated:Boolean(session),connected:sourceStatus.state==='ready',account:session?.account||null,name:session?.name||null,role:session?.role||null,sourceStatus,configured:Boolean(connector),modules:{weld:Boolean(connector),alarm:Boolean(connector),spares:Boolean(connector),vision:true,tools:true,penetration:true},writeEnabled:Object.values(inventoryCapabilities).some(value=>value.enabled),inventoryCapabilities,sourceUrls:session?links():{},environmentLabel:config.environmentLabel||'',note:configurationError});
       }
       if(req.method==='POST'&&url.pathname==='/local/login'){
         if(!String(req.headers['content-type']||'').startsWith('application/json'))throw new PortalError('登录请求需要JSON格式。',415);
@@ -69,6 +74,8 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
       if(url.pathname.startsWith('/local/')){
         if(!session)throw new PortalError('请先登录工艺部门户。',401);
         if(req.method==='POST'&&!String(req.headers['content-type']||'').startsWith('application/json'))throw new PortalError('请求需要JSON格式。',415);
+        if(req.method==='GET'&&url.pathname==='/local/penetration/report')return json(res,200,await penetration.report(Object.fromEntries(url.searchParams)));
+        if(req.method==='POST'&&url.pathname==='/local/penetration/sync'){void penetration.sync();return json(res,202,{sync:penetration.status()});}
         if(req.method==='GET'&&url.pathname==='/local/tools')return json(res,200,toolService.manifest());
         const toolRoute=/^\/local\/tools\/v1\/([a-z-]+)\/(contract|run)$/.exec(url.pathname);
         if(toolRoute){
@@ -85,12 +92,12 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
           if(session.role!=='admin')throw new PortalError('只有管理员可以登记检具。',403);
           const input=await body(req);
           if(getSession(req)?.role!=='admin')throw new PortalError('管理员权限已改变，请重新登录。',401);
-          const result=await vision.saveDraft(input);
+          const result=await vision.saveDraft(privacy.restore(input));
           if(getSession(req)?.role!=='admin')throw new PortalError('会话已改变，请重新登录后核对登记结果。',401);
           return json(res,200,result);
         }
         if(req.method==='GET'&&url.pathname==='/local/vision/report'){
-          const result=await vision.report(Object.fromEntries(url.searchParams));
+          const result=await vision.report(privacy.restore(Object.fromEntries(url.searchParams)));
           if(!getSession(req))throw new PortalError('会话已退出，请重新登录。',401);
           return json(res,200,result);
         }
@@ -117,12 +124,12 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
           for(const [key,value] of sessions)if(value.account===session.account)sessions.delete(key);
           return json(res,200,{message:'密码已更新，请重新登录。',authenticated:false},{'Set-Cookie':`portal_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${tls?'; Secure':''}`});
         }
-        if(req.method==='GET'&&url.pathname==='/local/inventory/catalog')return json(res,200,await inventory.catalog({search:(url.searchParams.get('search')||'').slice(0,200),code:(url.searchParams.get('code')||'').slice(0,2048)}));
+        if(req.method==='GET'&&url.pathname==='/local/inventory/catalog')return json(res,200,await inventory.catalog({search:privacy.restore((url.searchParams.get('search')||'').slice(0,200)),code:privacy.restore((url.searchParams.get('code')||'').slice(0,2048))}));
         if(req.method==='GET'&&url.pathname==='/local/inventory/records')return json(res,200,await inventory.list({type:url.searchParams.get('type')||undefined,status:url.searchParams.get('status')||undefined},session));
         const stockRoutes={'/local/inventory/transactions':'transact','/local/inventory/counts':'count','/local/inventory/review':'review'};
         if(req.method==='POST'&&stockRoutes[url.pathname]){
           const input=await body(req),actor=getSession(req);if(!actor)throw new PortalError('登录状态已改变，请重新登录。',401);
-          const result=await inventory[stockRoutes[url.pathname]](input,actor);return json(res,200,result);
+          const result=await inventory[stockRoutes[url.pathname]](privacy.restore(input),actor);return json(res,200,result);
         }
         if(req.method==='POST'&&url.pathname==='/local/connect'){
           if(session.role!=='admin')throw new PortalError('只有管理员可以配置公司系统连接。',403);
@@ -143,7 +150,7 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
         if(req.method==='GET'&&match){
           if(match[1]==='spares'&&session.role!=='admin')throw new PortalError('请使用工艺部备件工作台查询已配置范围内的备件。',403);
           const module=match[1],query=parseQuery(url.searchParams,module);
-          const result=await dataService.read(module,query);
+          const result=await dataService.read(module,privacy.restore(query));
           if(!getSession(req))throw new PortalError('会话已退出，请重新登录。',401);
           return json(res,200,result);
         }
@@ -165,8 +172,8 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
     }catch(error){if(!res.headersSent)json(res,error.status||500,{message:error.status?error.message:'本地服务暂时无法完成此操作，请重试。',code:error.code,recordId:error.recordId,outcome:error.outcome,sourceStatus:dataService.status()});else res.end();}
   };
   const server=tls?https.createServer(tls,handler):http.createServer(handler);
-  server.on('listening',()=>{ void vision.start?.(); });
-  server.on('close',()=>{ vision.stop?.();dataService.stop(); });
+  server.on('listening',()=>{ void vision.start?.();void penetration.start?.(); });
+  server.on('close',()=>{ vision.stop?.();penetration.stop?.();dataService.stop(); });
   server.requestTimeout=65000;server.headersTimeout=15000;
   return server;
 }

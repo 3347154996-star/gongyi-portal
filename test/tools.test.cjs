@@ -48,6 +48,7 @@ function weldContext() {
     return nodes.get(id);
   };
   const context = vm.createContext({ window: {}, document: { getElementById: get }, navigator: {}, setTimeout, console });
+  vm.runInContext(read('privacy.js'), context);
   vm.runInContext(read('weld-export/app.js'), context);
   return { context, get };
 }
@@ -63,7 +64,8 @@ test('weld import parses task-specific data and clears stale main calls on subse
   assert.equal(result.rowCount, 1); assert.equal(result.rows[0][1], 'TASK1');
   assert.equal(result.rows[0][9], 10); assert.equal(result.rows[0][10], 23.62);
   assert.equal(result.rows[0][12], 24); assert.equal(result.rows[0][13], 236.22);
-  assert.match(get('resTable').innerHTML, /&lt;img src=x&gt;/);
+  assert.doesNotMatch(get('resTable').innerHTML, /Synthetic seam|WL_DEMO/);
+  assert.match(get('resTable').innerHTML, /程序-[A-Z0-9]+/);
   assert.doesNotMatch(get('resTable').innerHTML, /<img src=x>/);
   await context.window.WeldExportTool.importFiles([file('Test.mod', weldText, 'Backup/TASK1/Test.mod')]);
   assert.equal(context.window.WeldExportTool.getResult().rowCount, 0, 'No stale main call from the earlier backup');

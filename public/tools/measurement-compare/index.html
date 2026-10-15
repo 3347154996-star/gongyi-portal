@@ -12,11 +12,13 @@
 <div class="reading-note"><strong>差值按“现场值 − 三坐标值”计算，统一理论基准后以＋／－显示。</strong>单位：mm。</div>
 <div class="tabs" role="tablist" aria-label="查看方式"><button type="button" id="tab-point" role="tab" aria-selected="true" aria-controls="point-view">按点位看多件</button><button type="button" id="tab-sample" role="tab" aria-selected="false" aria-controls="sample-view">按工件看所有点</button></div>
 <div class="toolbar"><label for="threshold">标记相差大于</label><input id="threshold" type="number" min="0.0001" step="0.01" value="0.2" aria-label="标记差值阈值"><span class="note">mm</span><span class="spacer"></span><label><input id="only-exceed" type="checkbox"> 表格只看超过此值的项目</label></div>
-<div id="point-view" role="tabpanel" aria-labelledby="tab-point"><div class="toolbar"><label for="point-select">点位方向</label><select id="point-select"></select><input type="search" id="point-search" placeholder="查找点号 / 名称" aria-label="查找点号或名称"></div><div id="point-content"></div></div>
+<div id="point-view" role="tabpanel" aria-labelledby="tab-point"><div class="toolbar"><label for="point-select">点位方向</label><select id="point-select"></select><input type="search" id="point-search" placeholder="查找点号 / 方向" aria-label="查找点号或方向"></div><div id="point-content"></div></div>
 <div id="sample-view" role="tabpanel" aria-labelledby="tab-sample" hidden><div class="toolbar"><label for="sample-select">选择工件</label><select id="sample-select"></select></div><div id="sample-content"></div></div>
 <details class="explanation"><summary>数据口径与文件说明</summary><p>“现场值”“三坐标值”直接取自两份原表。原表记录的是相对理论尺寸的偏差。差值 = 现场值 − 三坐标值 +（现场理论值 − 三坐标理论值）；理论值不同时会在该点注明。</p><p>按工件编号、点号及X/Y/Z方向匹配。轮廓度、Size等不同评价项目不混入坐标对比。同一编号的现场复测分别列出；无法唯一确定的三坐标重复记录和点位会在匹配情况中说明。</p><p>曲线按现场测量时间排列。不同日期可能对应不同工件，曲线变化表示本次配对数据的变化。</p><p>文件只在当前浏览器内处理。工具不会执行Excel中的宏，也不会重算公式；使用报表已保存的数值。关闭页面不会保存导入内容，可用“保存本次结果”留存一份HTML。</p><p id="version">本工具内置JSZip 3.10.1（MIT许可），用于读取Excel文件。</p></details></section>
+<p class="file-note">名称保密显示：文件、工作表及混合文字编号使用稳定代号，纯数字工件编号（含前导零）、点号与方向保留。保存结果不包含原文件名或名称映射；本地代号与门户产品目录独立。</p>
 <footer class="foot">保存的结果 HTML 包含图表与本地组件，可离线查看，也可继续导入同格式报告。</footer></main>
 <script type="application/json" id="saved-result">null</script>
 <script src="../vendor/jszip.min.js"></script><script src="core.js"></script><script src="../bridge.js"></script>
+<script src="../privacy.js"></script>
 <script src="app.js"></script>
 </body></html>
