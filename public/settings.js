@@ -13,6 +13,7 @@
       <div class="settings-heading"><div><h2 id="settingsAccountTitle">个人账号</h2><p>查看当前身份，维护登录密码。</p></div><button id="settingsChangePassword" class="button" type="button">修改密码</button></div>
       <dl class="settings-account"><div><dt>姓名</dt><dd id="settingsName">—</dd></div><div><dt>工号</dt><dd id="settingsAccount">—</dd></div><div><dt>当前角色</dt><dd id="settingsRole">—</dd></div></dl>
       <p id="settingsAccessNote" class="settings-note">成员名单与权限由管理员维护。</p>
+      <p class="settings-note">公司尺寸查询复用公司业务数据源；管理员可在视觉检具页面打开“数据源设置”验证连接。</p>
     </section>
     <section id="settingsMembersPanel" class="settings-panel" aria-labelledby="settingsMembersTitle" hidden>
       <div class="settings-heading"><div><h2 id="settingsMembersTitle">成员管理</h2><p>登记工号、启停账号，并指定盘点复核人。</p></div><div class="settings-actions"><button id="settingsRefreshMembers" type="button" class="button">刷新名单</button><button id="settingsAddMember" type="button" class="button primary">添加成员</button></div></div>

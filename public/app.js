@@ -8,7 +8,7 @@
   const MODULES = {
     weld: {title:'补焊点',description:'默认查看当天实时缺陷记录，也可按日期、产品和线体查询趋势。',notice:'统计源自焊接不合格日志。日志条数不等于产品数，也不能据此确认已完成补焊。'},
     alarm: {title:'安灯报警',description:'按所选时间、线体和部门查看报警处理进度。',notice:'范围内的报警记录，不代表全部设备即时状态。'},
-    vision: {title:'视觉检具',description:'按线体和检具查看检测结果、合格率趋势与测点明细。',notice:'仅纳入普通检测，排除 ALLmeasure 全检。统计按检测次数计算，同一 SN 复测分别保留。'},
+    vision: {title:'视觉检具',description:'从公司系统查看各线体的检测记录、合格率趋势与尺寸明细。',notice:'按检测次数统计，同一工件复测分别保留；公司系统与采集文件分别统计，不混合计数。'},
     penetration: {title:'熔深合格率',description:'按公司周、月份、检测类别和产品名称查看合格率与检测统计。',notice:'合格率采用来源配置口径。未判定数量单独显示，不将缺失结果补填为合格。'},
     spares: {title:'备件管理',description:'入库、出库与盘点，在手机和电脑上完成；成员操作按登录工号留痕。',notice:'库存变化以公司系统回写确认为准。'},
     settings: {title:'设置',description:'查看个人账号，管理门户成员与权限。',notice:'成员管理仅对管理员开放；账号权限以门户保存结果为准。'},
@@ -57,7 +57,9 @@
   }
   function renderConnection(){
     window.InventoryWorkbench?.setContext(state.authenticated?state.status:null,state.module==='spares');
-    window.VisionWorkbench?.setContext(state.authenticated?state.status:null,state.module==='vision');
+    window.VisionWorkbench?.setContext(state.authenticated?state.status:null,state.module==='vision'&&(window.MesVisionReportWorkbench?.isFileMode()??true));
+    window.MesVisionWorkbench?.setContext(state.authenticated?state.status:null,state.module==='vision');
+    window.MesVisionReportWorkbench?.setContext(state.authenticated?state.status:null,state.module==='vision');
     window.PortalTools?.setContext(state.authenticated?state.status:null,state.module==='tools');
     window.SettingsWorkbench?.setContext(state.authenticated?state.status:null,state.module==='settings');
     window.PenetrationWorkbench?.setContext(state.authenticated?state.status:null,state.module==='penetration');
@@ -72,12 +74,13 @@
     $('#queryButton').disabled=!canRead()||state.loading;$('#refreshButton').disabled=!canRead()||state.loading;
     $('#previewImport').disabled=!state.authenticated||!validImportFile($('#importFile').files[0])||Boolean(importState.controller);
     const source=safeSourceUrl();$('#sourceLink').hidden=!source;if(source)$('#sourceLink').href=source;
-    if(state.module==='vision'){$('#connectionBadge').textContent='视觉检具数据';$('#connectionBadge').classList.remove('connected','error');$('#loginButton').hidden=true;$('#sourceLink').hidden=true;}
+    if(state.module==='vision'){$('#connectionBadge').textContent='视觉检具数据';$('#connectionBadge').classList.remove('connected','error');$('#sourceLink').hidden=true;}
     if(state.module==='tools'){$('#connectionBadge').textContent='本地工艺工具';$('#connectionBadge').classList.remove('connected','error');$('#loginButton').hidden=true;$('#sourceLink').hidden=true;}
     if(state.module==='penetration'){$('#connectionBadge').textContent='熔深统计数据';$('#connectionBadge').classList.remove('connected','error');$('#loginButton').hidden=true;$('#sourceLink').hidden=true;}
     if(state.module==='settings'){$('#connectionBadge').textContent='门户设置';$('#connectionBadge').classList.remove('connected','error');$('#loginButton').hidden=true;$('#sourceLink').hidden=true;}
     renderPolling();
   }
+  window.addEventListener('vision-source-change',()=>renderConnection());
   function invalidateStatusRequest(){state.authEpoch++;clearTimeout(state.statusTimer);state.statusTimer=null;const request=state.statusRequest;state.statusRequest=null;state.statusLoading=false;if(request)request.controller.abort();}
   async function checkStatus({read=false}={}){
     if(state.statusRequest)return state.statusRequest.promise;

@@ -4,6 +4,10 @@
   "loginToken": "REQUEST_FROM_YOUR_SYSTEM_ADMIN",
   "port": 4173,
   "vision": {
+    "mes": {
+      "defaultLineId": "",
+      "maxPages": 150
+    },
     "dataFile": "runtime/vision-input.json",
     "maxScanAgeSeconds": 7200,
     "pollIntervalSeconds": 30,
