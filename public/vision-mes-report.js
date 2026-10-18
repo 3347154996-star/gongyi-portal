@@ -53,6 +53,7 @@
     <div class="mes-report-stats" aria-label="当前查询的检测统计"><article><span id="mesReportTotalLabel">检测次数</span><strong id="mesReportTotal">—</strong><small>每次检测分别计数</small></article><article><span>合格 OK</span><strong id="mesReportOK">—</strong><small>公司系统整件结论</small></article><article class="ng"><span>不合格 NG</span><strong id="mesReportNG">—</strong><small>公司系统整件结论</small></article><article><span>检测合格率</span><strong id="mesReportRate">—</strong><small id="mesReportRateNote">OK / 有明确结论的检测次数</small></article></div>
     <p id="mesReportCoverage" class="mes-report-coverage" hidden></p>
     <section class="vis-panel mes-report-trend" aria-labelledby="mesReportTrendTitle"><div class="mes-report-panel-heading"><div><h3 id="mesReportTrendTitle">合格率趋势</h3><p id="mesReportTrendSubtitle">按当前查询返回的检测记录统计</p></div><label class="mes-report-interval">统计间隔<select id="mesReportInterval"><option value="auto">自动</option><option value="5">5 分钟</option><option value="15">15 分钟</option><option value="30">30 分钟</option><option value="60">1 小时</option><option value="1440">1 天</option></select></label></div><p id="mesReportTrendEmpty" class="mes-report-empty">查询后展示趋势。</p><div id="mesReportChart" class="mes-report-chart" hidden></div><div id="mesReportTrendDetail" class="mes-report-trend-detail" role="status" hidden></div><p id="mesReportTrendNote" class="mes-report-help" hidden></p></section>
+    <div id="mesVisionAnalysisHost"></div>
     <section class="vis-panel mes-report-records" aria-labelledby="mesReportRecordsTitle"><div class="mes-report-panel-heading"><div><h3 id="mesReportRecordsTitle">检测记录</h3><p id="mesReportScope">查询后展示该范围内的检测记录。</p></div><span id="mesReportPolling" class="mes-report-label">打开此页时每 60 秒刷新</span></div><p id="mesReportRecordsEmpty" class="mes-report-empty">尚未查询检测记录。</p><div id="mesReportTableWrap" class="mes-report-table-wrap" tabindex="0" aria-label="检测记录，可横向滚动" hidden><table><thead><tr><th scope="col">工件码 / SN</th><th scope="col">检测时间</th><th scope="col">物料</th><th scope="col">检测设备</th><th scope="col">整件结论</th><th scope="col">查看</th></tr></thead><tbody id="mesReportRows"></tbody></table></div><div class="mes-report-pagination"><label>每页<select id="mesReportPageSize"><option value="20">20 条</option><option value="50" selected>50 条</option><option value="100">100 条</option></select></label><div><button type="button" class="button" id="mesReportPrev">上一页</button><span id="mesReportPage">—</span><button type="button" class="button" id="mesReportNext">下一页</button></div></div></section>
     <details id="mesReportHistory" class="mes-report-history"><summary>历史不合格参数查询 <span>用于核查历史 NG，不代表工件最新状态</span></summary></details>`;
   host.prepend(root);
@@ -67,11 +68,12 @@
   let dateFilter = null, materialSearch = null;
   function visible() { return state.active && !document.hidden; }
   function reportOpen() { return state.reportOpen || Boolean(window.PortalReport?.isOpen?.()); }
+  function analysisOpen() { return Boolean(window.MesVisionAnalysis?.isBusy?.()); }
   function stopTimer() { clearTimeout(state.timer); state.timer = null; }
   function cancel(name) { const request = state[name]; state[name] = null; if (request) { clearTimeout(request.timeout); request.controller.abort(); } }
   function current(name, request) { return state[name] === request && request.epoch === state.epoch && state.active && state.status?.authenticated; }
   function begin(name) { cancel(name); const request = { controller: new AbortController(), epoch: state.epoch, timedOut: false }; request.timeout = setTimeout(() => { request.timedOut = true; request.controller.abort(); }, 60000); state[name] = request; return request; }
-  function schedule() { stopTimer(); if (visible() && state.applied && !state.reportRequest && !dialog.open && !reportOpen()) state.timer = setTimeout(() => loadReport(state.applied, false, 'poll'), 60000); }
+  function schedule() { stopTimer(); if (visible() && state.applied && !state.reportRequest && !dialog.open && !reportOpen() && !analysisOpen()) state.timer = setTimeout(() => loadReport(state.applied, false, 'poll'), 60000); }
   function closeDetail(resume = true) { cancel('detailRequest'); state.detail = null; if (dialog.open) dialog.close(); $('mesReportDetailContent').hidden = true; for (const id of ['mesReportDetailIdentity', 'mesReportDetailMeta', 'mesReportDetailRows', 'mesReportDetailWarnings']) $(id).replaceChildren(); if (resume !== false) { schedule(); controls(); } }
   function presetDates(period) {
     if (window.PortalFilters?.range) { const range = window.PortalFilters.range(period); return { start: range.start + 'T00:00', end: range.end + 'T23:59' }; }
@@ -112,7 +114,7 @@
     const pages = Math.max(1, Math.ceil((state.report?.records.length || 0) / state.size));
     $('mesReportPrev').disabled = !state.report || state.page <= 1;
     $('mesReportNext').disabled = !state.report || state.page >= pages;
-    $('mesReportPolling').textContent = !visible() ? '自动刷新已暂停' : reportOpen() ? '报告预览期间暂停自动刷新' : dialog.open ? '查看测点时暂停自动刷新' : busy ? '正在读取检测记录…' : '打开此页时每 60 秒刷新';
+    $('mesReportPolling').textContent = !visible() ? '自动刷新已暂停' : reportOpen() ? '报告预览期间暂停自动刷新' : dialog.open ? '查看测点时暂停自动刷新' : analysisOpen() ? '测点分析期间暂停自动刷新' : busy ? '正在读取检测记录…' : '打开此页时每 60 秒刷新';
     const count = queryMode() === 'count'; root.dataset.queryMode = count ? 'count' : 'time';
     for (const [fieldId, inputId] of [['mesReportRangeField', 'mesReportRangeMode'], ['mesReportStartField', 'mesReportStart'], ['mesReportEndField', 'mesReportEnd']]) { $(fieldId).hidden = count; $(inputId).disabled = count; }
     if (dateFilter?.weekControls) { dateFilter.weekControls.hidden = count || $('mesReportRangeMode').value !== 'companyWeek'; for (const input of dateFilter.weekControls.querySelectorAll('input,select,button')) input.disabled = count; }
@@ -120,6 +122,7 @@
     const custom = count && $('mesReportLimit').value === 'custom'; $('mesReportCustomLimit').hidden = !custom; $('mesReportLimitCount').disabled = !custom;
     $('mesReportModeHelp').textContent = count ? '按数量查询符合下方条件的最近检测，不应用时间筛选；结果会显示本次记录覆盖的时段。' : '按时间查询所选范围内的全部检测，不限制最近数量。';
     $('mesReportExport').disabled = !exportReady(); $('mesReportExport').title = exportReady() ? '按当前已应用条件生成一页报告' : '请先应用筛选并完整读取非空数据，再生成报告。';
+    window.MesVisionAnalysis?.setContext?.({ report: state.report, query: state.applied, active: state.active, account: state.account, draft: draft(), loading: busy, error: state.error });
   }
   function applyPreset(period) { const value = ['today', 'yesterday', 'companyWeek', 'week', 'month'].includes(period) ? period : 'today'; if (dateFilter) dateFilter.reset(value); else { const dates = presetDates(value); $('mesReportStart').value = dates.start; $('mesReportEnd').value = dates.end; $('mesReportRangeMode').value = value; } controls(); }
   const storageKey = (account, version = 'v2') => 'portal:vision-mes:view:' + version + ':' + encodeURIComponent(account);
@@ -226,7 +229,7 @@
   }
   async function loadReport(query, fresh, reason = 'manual') {
     if (!visible()) return;
-    if ((dialog.open || reportOpen()) && reason !== 'manual') { stopTimer(); return; }
+    if ((dialog.open || reportOpen() || analysisOpen()) && reason !== 'manual') { stopTimer(); return; }
     const invalid = validateFilters(query); if (invalid) { state.error = invalid; renderStatus(); controls(); return; }
     stopTimer(); closeDetail(false); const request = begin('reportRequest'); state.error = ''; controls(); renderStatus();
     try {
@@ -415,6 +418,7 @@
   $('mesReportExport').addEventListener('click', () => { if (!exportReady()) return; try { stopTimer(); window.PortalReport.open(reportInput()); state.reportOpen = true; controls(); } catch (error) { state.reportOpen = false; state.error = error.message || '报告暂时无法生成，请重新查询后重试。'; renderStatus(); controls(); schedule(); } });
   document.addEventListener('portal:report-open', () => { state.reportOpen = true; stopTimer(); controls(); });
   document.addEventListener('portal:report-close', () => { state.reportOpen = false; schedule(); controls(); });
+  document.addEventListener('vision-mes-analysis-busy', () => { stopTimer(); Promise.resolve().then(() => { controls(); schedule(); }); });
   $('mesReportRows').addEventListener('click', event => { const button = event.target.closest('[data-mes-record-id]'); if (button) openDetail(button.dataset.mesRecordId); });
   $('mesReportDetailClose').addEventListener('click', closeDetail); dialog.addEventListener('cancel', event => { event.preventDefault(); closeDetail(); });
   $('mesReportDetailOnlyNG').addEventListener('change', renderDetailRows);

@@ -81,14 +81,16 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
           if(req.method==='POST'&&toolRoute[2]==='run')return json(res,200,await toolService.runRemote(toolRoute[1]));
           throw new PortalError('此工具接口不支持该请求方式。',405);
         }
-        const mesVisionRoute=/^\/local\/vision\/mes\/(processes|lookup|catalog|report|detail)$/.exec(url.pathname);
+        const mesVisionRoute=/^\/local\/vision\/mes\/(processes|lookup|catalog|report|detail|analysis)$/.exec(url.pathname);
         if(mesVisionRoute){
           if(req.method!=='GET')throw new PortalError('公司尺寸查询仅支持读取。',405);
           const action=mesVisionRoute[1];
-          const allowed=new Set(action==='catalog'?[]:action==='report'?['queryMode','lineId','start','end','limit','barcode','partCode','productionLine','deviceCode','result']:action==='detail'?['recordId']:['barcode','processId']);
+          const allowed=new Set(action==='catalog'?[]:action==='report'?['queryMode','lineId','start','end','limit','barcode','partCode','productionLine','deviceCode','result']:action==='analysis'?['snapshotId','offset']:action==='detail'?['recordId']:['barcode','processId']);
           for(const key of url.searchParams.keys())if(!allowed.has(key)||url.searchParams.getAll(key).length!==1)throw new PortalError('尺寸查询条件无效。',400);
           const isLookup=['processes','lookup'].includes(action);
           const query=privacy.restore(isLookup?{action,barcode:url.searchParams.get('barcode')||'',processId:url.searchParams.get('processId')||''}:{action,...Object.fromEntries(url.searchParams)});
+          // Scope frozen measurement batches to this portal login, even when company credentials are shared.
+          if(action==='report'||action==='analysis')query._viewerScope=crypto.createHash('sha256').update(sidOf(req)).digest('hex');
           const result=await dataService.read(isLookup?'visionMes':'visionMesReport',query);
           if(!getSession(req))throw new PortalError('会话已退出，请重新登录。',401);
           return json(res,200,result);

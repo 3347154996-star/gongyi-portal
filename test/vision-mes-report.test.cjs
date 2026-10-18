@@ -600,3 +600,179 @@ test('local catalog excludes only the requested phase-four front and rear dimens
   for (const lineId of ['1', '2', '3', '4']) await rejectsStatus(service.read(query({ lineId }), SESSION), 400);
   assert.equal(calls.filter(c => c.path === REPORT).length, 0, 'excluded IDs cannot bypass the local catalog to query company reports');
 });
+
+const VIEWER = 'synthetic_portal_session_A';
+const scopedQuery = overrides => query({ _viewerScope: VIEWER, ...overrides });
+const batchQuery = (snapshotId, overrides = {}) => ({ action: 'analysis', snapshotId, offset: 0, _viewerScope: VIEWER, ...overrides });
+
+test('only complete, nonempty and bounded reports provide a session-bound analysis snapshot', async () => {
+  const ready = setup();
+  const report = await ready.service.read(scopedQuery(), SESSION);
+  assert.equal(report.analysisSnapshot.available, true);
+  assert.match(report.analysisSnapshot.snapshotId, /^[a-f0-9]{48}$/);
+  assert.equal(report.analysisSnapshot.total, 1);
+  assert.equal(report.analysisSnapshot.batchSize, 20);
+  assert.equal(report.analysisSnapshot.maxRecords, 1000);
+  assert.equal(report.analysisSnapshot.expiresAt, new Date(NOW + 30 * 60000).toISOString());
+  assert.equal(ready.calls.filter(call => call.path.startsWith(DETAIL)).length, 0, 'report does not automatically fetch measurement details');
+  for (const options of [{ rows: [] }, { rows: [record(0, { type: null })] }, { rows: Array.from({ length: 1001 }, (_, i) => record(i)) }]) {
+    const { service } = setup(options), value = await service.read(scopedQuery(), SESSION);
+    assert.equal(value.analysisSnapshot.available, false);
+    assert.equal(value.analysisSnapshot.snapshotId, null);
+    assert.ok(value.analysisSnapshot.reason);
+    if (options.rows.length === 1001) {
+      assert.equal(value.summary.total, 1001);
+      assert.match(value.analysisSnapshot.reason, /1000.*不会抽样/);
+    }
+  }
+  const unscoped = await ready.service.read(query(), SESSION);
+  assert.equal(unscoped.analysisSnapshot.available, false, 'legacy callers still get a report without a portable analysis capability');
+});
+
+test('analysis pages the entire immutable selected snapshot in fixed batches and keeps detection identities', async () => {
+  const { service, calls } = setup({ rows: Array.from({ length: 25 }, (_, i) => record(i, { barCode: 'SYN2628911A001' })) });
+  const report = await service.read(scopedQuery({ limit: 25 }), SESSION), snapshotId = report.analysisSnapshot.snapshotId;
+  report.records[0].barcode = 'MUTATED-CALLER'; report.filters.limit = 1;
+  const first = await service.read(batchQuery(snapshotId), SESSION), second = await service.read(batchQuery(snapshotId, { offset: '20' }), SESSION);
+  assert.equal(first.total, 25); assert.equal(first.offset, 0); assert.equal(first.nextOffset, 20);
+  assert.equal(first.complete, true); assert.deepEqual(first.errors, []);
+  assert.equal(second.offset, 20); assert.equal(second.nextOffset, null); assert.equal(second.items.length, 5);
+  assert.deepEqual([...first.items, ...second.items].map(item => item.index), Array.from({ length: 25 }, (_, i) => i));
+  assert.equal(new Set([...first.items, ...second.items].map(item => item.recordId)).size, 25);
+  assert.equal(first.items[0].barcode, 'SYN2628911A001');
+  assert.equal(first.filters.limit, 25);
+  assert.equal(first.items[0].sourceResult, 'NG');
+  assert.equal(first.items[0].measurements[0].critical, null);
+  assert.equal(first.items[0].measurements[0].actual, 0.2);
+  assert.equal(first.items[0].detailFetchedAt, new Date(NOW).toISOString());
+  assert.doesNotMatch(JSON.stringify(first), new RegExp(VIEWER + '|' + SESSION.token));
+  assert.equal(calls.filter(call => call.path.startsWith(DETAIL)).length, 25);
+  assert.ok(calls.filter(call => call.path.startsWith(DETAIL)).every(call => Object.keys(call.query).length === 0));
+});
+
+test('analysis rejects other portal sessions, other company sessions, invalid snapshots and offsets before detail access', async () => {
+  const { service, calls } = setup({ rows: Array.from({ length: 25 }, (_, i) => record(i)) });
+  const { analysisSnapshot } = await service.read(scopedQuery(), SESSION), key = analysisSnapshot.snapshotId;
+  await rejectsStatus(service.read(batchQuery(key, { _viewerScope: 'synthetic_portal_session_B' }), SESSION), 404);
+  await rejectsStatus(service.read(batchQuery(key), { token: 'different-company-session' }), 404);
+  await rejectsStatus(service.read({ action: 'analysis', snapshotId: key, offset: 0 }, SESSION), 400);
+  for (const snapshotId of ['1', '../detail/1', 'a'.repeat(48), null]) {
+    await rejectsStatus(service.read(batchQuery(snapshotId), SESSION), snapshotId === 'a'.repeat(48) ? 404 : 400);
+  }
+  for (const offset of [-1, 1, 19, 25, 40, 1.5, '1e1', true, null, []]) {
+    await rejectsStatus(service.read(batchQuery(key, { offset }), SESSION), 400);
+  }
+  for (const _viewerScope of ['short', {}, 'bad\nsession-value']) await rejectsStatus(service.read(scopedQuery({ _viewerScope }), SESSION), 400);
+  assert.equal(calls.filter(call => call.path.startsWith(DETAIL)).length, 0);
+});
+
+test('analysis snapshot expiry is absolute and bounded eviction never grants an old ID access', async () => {
+  const { service, setNow } = setup({ config: { vision: { mes: { analysisSnapshotTtlMs: 1000, analysisMaxSnapshots: 1 } } } });
+  const first = await service.read(scopedQuery(), SESSION), second = await service.read(scopedQuery(), SESSION);
+  await rejectsStatus(service.read(batchQuery(first.analysisSnapshot.snapshotId), SESSION), 404);
+  setNow(NOW + 999);
+  await service.read(batchQuery(second.analysisSnapshot.snapshotId), SESSION);
+  setNow(NOW + 1000);
+  await rejectsStatus(service.read(batchQuery(second.analysisSnapshot.snapshotId), SESSION), 410);
+});
+
+test('analysis limits actual detail concurrency to two across overlapping batches and caches repeat details', async () => {
+  let active = 0, peak = 0;
+  const { service, calls } = setup({ rows: Array.from({ length: 40 }, (_, i) => record(i)), onCall: async path => {
+    if (!path.startsWith(DETAIL)) return;
+    active++; peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 2)); active--;
+  } });
+  const report = await service.read(scopedQuery(), SESSION), snapshotId = report.analysisSnapshot.snapshotId;
+  const [first, duplicate, second] = await Promise.all([service.read(batchQuery(snapshotId), SESSION),
+    service.read(batchQuery(snapshotId), SESSION), service.read(batchQuery(snapshotId, { offset: 20 }), SESSION)]);
+  assert.equal(peak, 2); assert.equal(first.items.length, 20); assert.equal(duplicate.items.length, 20); assert.equal(second.items.length, 20);
+  assert.equal(calls.filter(call => call.path.startsWith(DETAIL)).length, 40, 'in-flight requests for the same scope/record are deduplicated');
+  first.items[0].measurements[0].actual = 999;
+  const again = await service.read(batchQuery(snapshotId), SESSION);
+  assert.equal(calls.filter(call => call.path.startsWith(DETAIL)).length, 40);
+  assert.equal(again.items[0].measurements[0].actual, 0.2, 'returned arrays cannot mutate cached measurement values');
+});
+
+test('analysis reports individual failures without inventing measurements and a retry only fetches failed details', async () => {
+  let broken = true;
+  const { service, calls } = setup({ rows: [record(0), record(1), record(2)], onCall: path => {
+    if (broken && path === DETAIL + '2') throw Object.assign(new Error('private upstream diagnostic must not be exposed'), { status: 502 });
+  } });
+  const report = await service.read(scopedQuery(), SESSION), key = report.analysisSnapshot.snapshotId;
+  const partial = await service.read(batchQuery(key), SESSION);
+  assert.equal(partial.complete, false); assert.equal(partial.nextOffset, null);
+  assert.deepEqual(partial.items.map(item => item.recordId), ['1', '3']);
+  assert.deepEqual(partial.errors.map(({ index, recordId }) => ({ index, recordId })), [{ index: 1, recordId: '2' }]);
+  assert.doesNotMatch(JSON.stringify(partial.errors), /private upstream/);
+  broken = false;
+  const retried = await service.read(batchQuery(key), SESSION);
+  assert.equal(retried.complete, true); assert.deepEqual(retried.errors, []);
+  assert.equal(retried.items.length, 3);
+  assert.equal(calls.filter(call => call.path.startsWith(DETAIL)).length, 4);
+});
+
+test('analysis authentication failures abort the batch while malformed detail remains an explicit record error', async () => {
+  for (const status of [401, 403]) {
+    const { service } = setup({ onCall: path => { if (path.startsWith(DETAIL)) throw Object.assign(new Error('source auth'), { status }); } });
+    const report = await service.read(scopedQuery(), SESSION);
+    await rejectsStatus(service.read(batchQuery(report.analysisSnapshot.snapshotId), SESSION), status);
+  }
+  const malformed = setup({ detail: [point(0), point(0)] });
+  const report = await malformed.service.read(scopedQuery(), SESSION);
+  const result = await malformed.service.read(batchQuery(report.analysisSnapshot.snapshotId), SESSION);
+  assert.equal(result.complete, false); assert.equal(result.items.length, 0); assert.equal(result.errors.length, 1);
+});
+
+test('analysis detail cache expires and entry or point limits remain bounded', async () => {
+  const { service, calls, setNow } = setup({ config: { vision: { mes: { analysisDetailCacheTtlMs: 100 } } } });
+  const report = await service.read(scopedQuery(), SESSION), query = batchQuery(report.analysisSnapshot.snapshotId);
+  await service.read(query, SESSION); setNow(NOW + 100); await service.read(query, SESSION);
+  assert.equal(calls.filter(call => call.path.startsWith(DETAIL)).length, 2);
+  for (const limits of [{ analysisDetailCacheEntries: 1 }, { analysisDetailCachePoints: 1 }]) {
+    const boundedCache = setup({ rows: [record(0), record(1)], config: { vision: { mes: limits } } });
+    const snapshot = (await boundedCache.service.read(scopedQuery(), SESSION)).analysisSnapshot.snapshotId;
+    await boundedCache.service.read(batchQuery(snapshot), SESSION);
+    await boundedCache.service.read(batchQuery(snapshot), SESSION);
+    assert.ok(boundedCache.calls.filter(call => call.path.startsWith(DETAIL)).length > 2, 'old cached entries are evicted at the configured limit');
+  }
+});
+
+test('analysis rejects a snapshot that expires while its details are being read', async () => {
+  let fixture;
+  fixture = setup({ config: { vision: { mes: { analysisSnapshotTtlMs: 100 } } }, onCall: path => {
+    if (path.startsWith(DETAIL)) fixture.setNow(NOW + 100);
+  } });
+  const report = await fixture.service.read(scopedQuery(), SESSION);
+  await rejectsStatus(fixture.service.read(batchQuery(report.analysisSnapshot.snapshotId), SESSION), 410);
+});
+
+test('timed-out analysis callers keep actual upstream slots occupied until requests settle', async () => {
+  const releases = [];
+  let active = 0, peak = 0;
+  const { service, calls } = setup({ rows: [record(0), record(1)], config: { maxDurationMs: 40 }, onCall: async path => {
+    if (!path.startsWith(DETAIL)) return;
+    active++; peak = Math.max(peak, active);
+    await new Promise(resolve => releases.push(resolve)); active--;
+  } });
+  const snapshotId = (await service.read(scopedQuery(), SESSION)).analysisSnapshot.snapshotId;
+  const first = await service.read(batchQuery(snapshotId), SESSION);
+  assert.equal(first.complete, false); assert.equal(first.errors.length, 2);
+  assert.equal(active, 2);
+  const second = await service.read(batchQuery(snapshotId), SESSION);
+  assert.equal(second.complete, false); assert.equal(second.errors.length, 2);
+  assert.equal(calls.filter(call => call.path.startsWith(DETAIL)).length, 2, 'timeouts cannot release slots while actual upstream work still runs');
+  for (const release of releases) release();
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(active, 0); assert.equal(peak, 2);
+  assert.equal(calls.filter(call => call.path.startsWith(DETAIL)).length, 2, 'already expired queued work never starts later');
+});
+
+test('unknown source metadata cannot turn an unverified field into a critical-point designation', async () => {
+  const { service } = setup({ detail: [point(0, { critical: true, is_key: 1, keyPoint: 'yes' })] });
+  const snapshotId = (await service.read(scopedQuery(), SESSION)).analysisSnapshot.snapshotId;
+  const batch = await service.read(batchQuery(snapshotId), SESSION);
+  assert.equal(batch.items[0].measurements[0].critical, null);
+  assert.equal(Object.hasOwn(batch.items[0].measurements[0], 'is_key'), false);
+});

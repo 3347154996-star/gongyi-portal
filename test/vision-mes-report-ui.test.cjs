@@ -52,6 +52,29 @@ function fixture(fetcher, options = {}) {
   return { node, api, fire, requests, events, timers, htmlWrites, context, documentHandlers, settle, start, submit, stored, reportCalls, filterCalls, materialCalls, closeReport };
 }
 
+test('measurement analysis receives the applied context and freezes automatic refresh until released', async () => {
+  const f = fixture(), contexts = []; let held = false;
+  f.context.window.MesVisionAnalysis = { isBusy: () => held, setContext: context => contexts.push(context) };
+  await f.start();
+  assert.equal(contexts.at(-1).report.records.length,2);
+  assert.equal(contexts.at(-1).query.lineId,'B');
+  assert.equal(contexts.at(-1).account,user.account);
+  assert.equal(contexts.at(-1).draft,false);
+  const queued=[...f.timers.values()].find(timer=>timer.ms===60000).callback;
+  held=true;f.documentHandlers.get('vision-mes-analysis-busy')();await f.settle();
+  assert.equal(f.timers.size,0);assert.match(f.node('mesReportPolling').textContent,/测点分析/);
+  const before=f.requests.length;queued();
+  f.context.document.hidden=true;f.documentHandlers.get('visibilitychange')();
+  f.context.document.hidden=false;f.documentHandlers.get('visibilitychange')();await f.settle();
+  assert.equal(f.requests.length,before);
+  f.node('mesReportResult').value='NG';f.fire('mesReportForm','change');
+  assert.equal(contexts.at(-1).draft,true);
+  held=false;f.documentHandlers.get('vision-mes-analysis-busy')();await f.settle();
+  assert.ok([...f.timers.values()].some(timer=>timer.ms===60000));
+  f.api.setContext({authenticated:false},true);
+  assert.equal(contexts.at(-1).active,false);assert.equal(contexts.at(-1).report,null);
+});
+
 test('default company view auto-discovers lines, uses configured default and counts each retest separately', async () => {
   const f = fixture(); await f.start();
   assert.equal(f.api.isFileMode(), false); assert.equal(f.node('visionWorkbench').hidden, false);

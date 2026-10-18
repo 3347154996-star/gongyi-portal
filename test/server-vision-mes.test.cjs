@@ -102,7 +102,7 @@ test('MES catalog, report and record detail require portal login and map to the 
   assert.equal(detail.status,200);assert.equal(detail.body.recordId,recordId);assert.equal(detail.body.measurements.length,1);
   assert.deepEqual(app.calls,[
     {module:'visionMesReport',query:{action:'catalog'}},
-    {module:'visionMesReport',query:{action:'report',...reportQuery}},
+    {module:'visionMesReport',query:{action:'report',...reportQuery,_viewerScope:app.calls[1].query._viewerScope}},
     {module:'visionMesReport',query:{action:'detail',recordId}},
   ]);
 });
@@ -115,13 +115,14 @@ test('MES quantity and time selectors are forwarded independently',async t=>{
   ]) {
     const response=await app.request('/local/vision/mes/report?'+new URLSearchParams(query),{cookie:app.member});
     assert.equal(response.status,200);
-    assert.deepEqual(app.calls.at(-1),{module:'visionMesReport',query:{action:'report',...query}});
+    assert.match(app.calls.at(-1).query._viewerScope,/^[a-f0-9]{64}$/);
+    assert.deepEqual(app.calls.at(-1),{module:'visionMesReport',query:{action:'report',...query,_viewerScope:app.calls.at(-1).query._viewerScope}});
   }
 });
 
 test('every batch MES route rejects writes and cross-site access before source reads',async t=>{
   const app=await fixture(t);
-  const routes=['/local/vision/mes/catalog','/local/vision/mes/report?lineId=123','/local/vision/mes/detail?recordId=456'];
+  const routes=['/local/vision/mes/catalog','/local/vision/mes/report?lineId=123','/local/vision/mes/detail?recordId=456','/local/vision/mes/analysis?snapshotId=synthetic&offset=0'];
   for(const route of routes){
     for(const method of ['POST','PUT','PATCH','DELETE','HEAD']){
       const response=await app.request(route,{method,cookie:app.member,...(method==='HEAD'?{}:{body:{recordId:'other'}})});
@@ -148,6 +149,11 @@ test('batch MES parameter allowlists reject extra fields and every duplicated se
     '/local/vision/mes/detail?recordId=456&employee=synthetic-employee',
     '/local/vision/mes/detail?recordId=456&recordId=456',
     '/local/vision/mes/detail?recordId=456&recordId=789',
+    '/local/vision/mes/report?lineId=123&_viewerScope=spoofed',
+    '/local/vision/mes/analysis?snapshotId=synthetic&offset=0&_viewerScope=spoofed',
+    '/local/vision/mes/analysis?snapshotId=synthetic&recordId=456',
+    '/local/vision/mes/analysis?snapshotId=synthetic&snapshotId=other&offset=0',
+    '/local/vision/mes/analysis?snapshotId=synthetic&offset=0&offset=20',
   ];
   for(const [key,value] of Object.entries({queryMode:'count',lineId:'123',start:'2026-02-03',end:'2026-02-04',limit:'573',barcode:'SYN-001',partCode:'PART-SYN',productionLine:'12',deviceCode:'DEVICE-SYN',result:'NG'})){
     const query=new URLSearchParams({queryMode:'count',lineId:'123',start:'2026-02-03',end:'2026-02-04',limit:'573',barcode:'SYN-001',partCode:'PART-SYN',productionLine:'12',deviceCode:'DEVICE-SYN',result:'NG'});
@@ -165,12 +171,12 @@ test('logout blocks all in-flight batch MES responses including catalogs, record
   const gate=new Promise(resolve=>{finish=resolve;});
   app.setReadHook(async(module,query)=>{
     assert.equal(module,'visionMesReport');
-    if(++started===3)ready();
+    if(++started===4)ready();
     await gate;
     return {action:query.action,lines:[{name:'synthetic-private-line'}],records:[{barcode:'synthetic-private-barcode'}],
       measurements:[{name:'synthetic-private-point',actual:0.25}]};
   });
-  const routes=['/local/vision/mes/catalog','/local/vision/mes/report?lineId=123','/local/vision/mes/detail?recordId=456'];
+  const routes=['/local/vision/mes/catalog','/local/vision/mes/report?lineId=123','/local/vision/mes/detail?recordId=456','/local/vision/mes/analysis?snapshotId=synthetic&offset=0'];
   const pending=routes.map(route=>app.request(route,{cookie:app.member}));
   await allStarted;
   try{assert.equal((await app.request('/local/logout',{cookie:app.member,method:'POST',body:{}})).status,200);}
@@ -181,7 +187,23 @@ test('logout blocks all in-flight batch MES responses including catalogs, record
     for(const field of ['lines','records','measurements'])assert.equal(result.body[field],undefined);
     assert.equal(JSON.stringify(result.body).includes('synthetic-private'),false);
   }
-  assert.deepEqual(app.calls.map(call=>call.query.action).sort(),['catalog','detail','report']);
+  assert.deepEqual(app.calls.map(call=>call.query.action).sort(),['analysis','catalog','detail','report']);
+});
+
+test('measurement snapshots receive a private stable scope per portal login, never a client-selected scope',async t=>{
+  const app=await fixture(t),report='/local/vision/mes/report?lineId=123',analysis='/local/vision/mes/analysis?snapshotId=synthetic&offset=0';
+  assert.equal((await app.request(analysis)).status,401);
+  for(const route of [report,analysis])assert.equal((await app.request(route,{cookie:app.member})).status,200);
+  const first=app.calls[0].query._viewerScope;
+  assert.match(first,/^[a-f0-9]{64}$/);
+  assert.equal(app.calls[1].query._viewerScope,first);
+  assert.equal(app.member.includes(first),false);
+  await app.request(report,{cookie:app.admin});
+  assert.notEqual(app.calls.at(-1).query._viewerScope,first);
+  const replacement=await app.request('/local/login',{method:'POST',cookie:app.member,body:{username:'00002',password}});
+  await app.request(report,{cookie:replacement.cookie});
+  assert.notEqual(app.calls.at(-1).query._viewerScope,first);
+  assert.equal((await app.request(analysis,{cookie:app.member})).status,401);
 });
 
 test('company session refresh retries only reads and never submits MES production data',async()=>{
