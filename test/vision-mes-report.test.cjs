@@ -103,7 +103,7 @@ test('a recent selection with fewer source records is complete only after exhaus
 test('same barcode with separate record IDs retains original NG and subsequent OK as separate events', async () => {
   const { service } = setup({ rows: [record(0, { barCode: 'SYNTHETIC-RETEST', type: 'OK' }), record(1, { barCode: 'SYNTHETIC-RETEST', type: 'NG' })] });
   const result = await service.read(query({ barcode: 'SYNTHETIC-RETEST' }), SESSION);
-  assert.deepEqual(result.summary, { total: 2, ok: 1, ng: 1, unknown: 0, denominator: 2, passRate: 50 });
+  assert.deepEqual(result.summary, { total: 2, ok: 1, ng: 1, unknown: 0, denominator: 2, passRate: null });
   assert.equal(result.coverage.eligibleForLineRate, false);
   assert.match(result.coverage.note, /单个工件/);
 });
@@ -119,7 +119,7 @@ test('input and session validation happen before upstream access', async () => {
   const { service, calls } = setup();
   await rejectsStatus(service.read(query(), null), 428);
   for (const q of [query({ action: 'POST' }), query({ lineId: '../x' }), query({ start: '2026-02-30' }),
-    query({ start: '2026-02-03T24:00' }), query({ start: '2026-02-04' }), query({ limit: 150 }),
+    query({ start: '2026-02-03T24:00' }), query({ start: '2026-02-04' }), query({ limit: 20001 }),
     query({ barcode: 'bad\ncode' })]) await rejectsStatus(service.read(q, SESSION), 400);
   assert.equal(calls.length, 0);
   await rejectsStatus(service.read(query({ lineId: '999' }), SESSION), 400);
@@ -326,4 +326,277 @@ test('invalid or duplicate point identities reject ambiguous detail', async () =
     await service.read(query(), SESSION);
     await rejectsStatus(service.read({ action: 'detail', recordId: '1' }, SESSION), 502);
   }
+});
+
+test('material and device filters are exact codes applied before selecting recent matches across pages', async () => {
+  const rows = Array.from({ length: 410 }, (_, i) => record(i, {
+    itemCode: i === 250 || i === 305 || i === 399 ? 'PART_PICK' : 'PART_OTHER',
+    itemName: i === 250 || i === 305 || i === 399 ? '所选合成物料' : '其他合成物料',
+    equipmentCode: i === 250 || i === 305 || i === 399 ? 'DEVICE_PICK' : 'DEVICE_OTHER',
+    equipmentName: i === 250 || i === 305 || i === 399 ? '所选合成设备' : '其他合成设备',
+  }));
+  rows[1].itemCode = 'PART_PICK_SUFFIX'; rows[1].equipmentCode = 'DEVICE_PICK';
+  rows[2].itemCode = 'PART_PICK'; rows[2].equipmentCode = 'DEVICE_PICK_SUFFIX';
+  const { service, calls } = setup({ rows });
+  const result = await service.read(query({ partCode: 'PART_PICK', deviceCode: 'DEVICE_PICK', limit: '2' }), SESSION);
+  assert.deepEqual(result.records.map(r => r.recordId), ['251', '306']);
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.coverage.eligibleForLineRate, true);
+  assert.equal(result.coverage.sourceTotal, 410);
+  assert.equal(result.coverage.readRows, 400);
+  assert.equal(result.summary.passRate, 0);
+  assert.equal(result.filters.partCode, 'PART_PICK');
+  assert.equal(result.filters.deviceCode, 'DEVICE_PICK');
+  assert.equal(result.filters.result, 'all');
+  assert.equal(result.filters.limit, 2);
+  assert.deepEqual(calls.filter(c => c.path === REPORT).map(c => c.query.page), [1, 2, 1]);
+  for (const c of calls.filter(c => c.path === REPORT)) {
+    for (const key of ['partCode', 'deviceCode', 'result', 'itemcode', 'sbbm']) assert.equal(Object.hasOwn(c.query, key), false, 'no unverified upstream filtering');
+  }
+});
+
+test('facets describe observed rows before local filters and exclude duplicate or invalid source rows', async () => {
+  const { service } = setup({ rows: [
+    record(0, { itemCode: 'P_B', itemName: '物料 B', equipmentCode: 'D_B', equipmentName: '设备 B' }),
+    record(1, { itemCode: 'P_A', itemName: '物料 A', equipmentCode: 'D_A', equipmentName: '设备 A' }),
+    record(2, { itemCode: 'P_B', itemName: '物料 B', equipmentCode: 'D_B', equipmentName: '设备 B' }),
+    record(3, { productLineCode: 'FOREIGN', itemCode: 'P_FOREIGN', equipmentCode: 'D_FOREIGN' }),
+  ] });
+  const result = await service.read(query({ partCode: 'P_A', deviceCode: 'D_A', result: 'OK' }), SESSION);
+  assert.deepEqual(result.facets, { parts: [{ code: 'P_A', name: '物料 A' }, { code: 'P_B', name: '物料 B' }],
+    devices: [{ code: 'D_A', name: '设备 A' }, { code: 'D_B', name: '设备 B' }],
+    materialLines: [{ code: 'P_A', name: '物料 A', productionLine: 'unknown' }, { code: 'P_B', name: '物料 B', productionLine: 'unknown' }] });
+  assert.deepEqual(result.records.map(r => r.recordId), ['2']);
+  assert.equal(result.coverage.complete, false);
+});
+
+test('result filtering never presents a single-verdict subset as a line pass rate', async () => {
+  for (const selectedResult of ['NG', 'OK']) {
+    const { service } = setup({ rows: [record(0), record(1), record(2)] });
+    const result = await service.read(query({ result: selectedResult }), SESSION);
+    assert.ok(result.records.every(row => row.result === selectedResult));
+    assert.equal(result.summary.total, selectedResult === 'NG' ? 1 : 2);
+    assert.equal(result.coverage.complete, true);
+    assert.equal(result.coverage.eligibleForLineRate, false);
+    assert.equal(result.summary.passRate, null);
+    assert.match(result.coverage.rateUnavailableReason, new RegExp(selectedResult));
+    assert.match(result.coverage.note, /未包含全部判定/);
+  }
+});
+
+test('recent result filter continues until matching count is reached rather than truncating before filtering', async () => {
+  const rows = Array.from({ length: 450 }, (_, i) => record(i, { type: i === 230 || i === 300 || i === 420 ? 'NG' : 'OK' }));
+  const { service, calls } = setup({ rows });
+  const result = await service.read(query({ result: 'NG', limit: 2 }), SESSION);
+  assert.deepEqual(result.records.map(row => row.recordId), ['231', '301']);
+  assert.equal(result.coverage.readRows, 400);
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.summary.passRate, null);
+  assert.deepEqual(calls.filter(c => c.path === REPORT).map(c => c.query.page), [1, 2, 1]);
+});
+
+test('empty local selection reads the full source and remains empty without inventing a pass rate', async () => {
+  const rows = Array.from({ length: 205 }, (_, i) => record(i));
+  const { service, calls } = setup({ rows });
+  const result = await service.read(query({ partCode: 'ABSENT_PART', limit: 1 }), SESSION);
+  assert.equal(result.records.length, 0);
+  assert.equal(result.coverage.readRows, 205);
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.summary.passRate, null);
+  assert.equal(result.filters.partCode, 'ABSENT_PART');
+  assert.deepEqual(result.facets.parts, [{ code: 'PART_TEST', name: '合成零件' }]);
+  assert.deepEqual(calls.filter(c => c.path === REPORT).map(c => c.query.page), [1, 2, 1]);
+});
+
+test('capped local search does not label zero matching rows as a complete empty result', async () => {
+  const rows = Array.from({ length: 205 }, (_, i) => record(i, { itemCode: i >= 200 ? 'LATER_PART' : 'FIRST_PART' }));
+  const { service } = setup({ rows, config: { vision: { mes: { maxPages: 1 } } } });
+  const result = await service.read(query({ partCode: 'LATER_PART', limit: 1 }), SESSION);
+  assert.equal(result.records.length, 0);
+  assert.equal(result.coverage.complete, false);
+  assert.equal(result.coverage.eligibleForLineRate, false);
+  assert.equal(result.summary.passRate, null);
+  assert.equal(result.coverage.sourceTotal, 205);
+});
+
+test('unknown verdicts are not hidden by a local result filter to fabricate completeness', async () => {
+  const { service } = setup({ rows: [record(0), record(1, { type: null })] });
+  const result = await service.read(query({ result: 'NG' }), SESSION);
+  assert.equal(result.summary.total, 1);
+  assert.equal(result.summary.unknown, 0);
+  assert.equal(result.coverage.complete, false);
+  assert.equal(result.summary.passRate, null);
+  assert.match(result.coverage.note, /未知工序判定/);
+});
+
+test('custom recent count accepts the full integer range and rejects ambiguous or invalid filters before reading', async () => {
+  for (const limit of [0, 1, 150, 20000, '1', '20000']) {
+    const { service } = setup();
+    const result = await service.read(query({ limit, partCode: '', deviceCode: '', result: 'all' }), SESSION);
+    assert.equal(result.filters.limit, Number(limit));
+    assert.equal(result.filters.partCode, null);
+    assert.equal(result.filters.deviceCode, null);
+    assert.equal(result.coverage.complete, true);
+  }
+  const { service, calls } = setup();
+  for (const invalid of [{ limit: -1 }, { limit: 20001 }, { limit: 1.5 }, { limit: true }, { limit: '1e2' },
+    { limit: [] }, { partCode: [] }, { deviceCode: 'bad\ncode' }, { result: 'unknown' }, { result: 'ng' }, { result: {} }]) {
+    await rejectsStatus(service.read(query(invalid), SESSION), 400);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test('facet options from a stopped recent read do not claim unobserved older material or device choices', async () => {
+  const rows = Array.from({ length: 205 }, (_, i) => record(i, { itemCode: i >= 200 ? 'OLDER_PART' : 'NEWER_PART',
+    equipmentCode: i >= 200 ? 'OLDER_DEVICE' : 'NEWER_DEVICE' }));
+  const { service } = setup({ rows });
+  const result = await service.read(query({ limit: 1 }), SESSION);
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.coverage.readRows, 200);
+  assert.deepEqual(result.facets.parts.map(row => row.code), ['NEWER_PART']);
+  assert.deepEqual(result.facets.devices.map(row => row.code), ['NEWER_DEVICE']);
+});
+
+test('time mode reads the whole chosen interval even when an obsolete recent limit is supplied', async () => {
+  const { service, calls } = setup({ rows: Array.from({ length: 205 }, (_, i) => record(i)) });
+  const result = await service.read(query({ queryMode: 'time', limit: '1' }), SESSION);
+  assert.equal(result.filters.queryMode, 'time');
+  assert.equal(result.filters.limit, 0);
+  assert.equal(result.summary.total, 205);
+  assert.equal(result.coverage.mode, 'range');
+  assert.equal(result.coverage.sourceExhausted, true);
+  assert.equal(result.coverage.complete, true);
+  assert.deepEqual(calls.filter(c => c.path === REPORT).map(c => c.query.page), [1, 2, 1]);
+});
+
+test('count mode ignores stale client dates and finds recent records across dates and pages', async () => {
+  const rows = Array.from({ length: 425 }, (_, i) => record(i, {
+    endTime: new Date(NOW - i * 3600000 - 60000).toISOString(),
+  }));
+  const { service, calls } = setup({ rows });
+  const result = await service.read(query({ queryMode: 'count', limit: '205', start: 'not-a-date', end: '1900-01-01' }), SESSION);
+  assert.equal(result.filters.queryMode, 'count');
+  assert.equal(result.filters.start, '2000-01-01 00:00:00');
+  assert.equal(result.filters.end, '2026-02-03 12:00:00');
+  assert.equal(result.summary.total, 205);
+  assert.equal(result.coverage.sourceExhausted, false);
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.coverage.lastMeasuredAt, result.records[0].measuredAt);
+  assert.equal(result.coverage.firstMeasuredAt, result.records.at(-1).measuredAt);
+  assert.ok(result.coverage.firstMeasuredAt.startsWith('2026-01-'));
+  assert.deepEqual(calls.filter(c => c.path === REPORT).map(c => c.query.page), [1, 2, 1]);
+  assert.ok(calls.filter(c => c.path === REPORT).every(c => c.query.start === result.filters.start && c.query.end === result.filters.end));
+  assert.match(result.coverage.note, /2000-01-01/);
+});
+
+test('count mode with fewer matches is complete only after supported history is exhausted', async () => {
+  const rows = [record(0), record(1, { endTime: '2024-01-03 11:00:00' }), record(2, { endTime: '2000-01-01 00:00:00' })];
+  const { service } = setup({ rows });
+  const result = await service.read({ action: 'report', lineId: '11', queryMode: 'count', limit: 500 }, SESSION);
+  assert.equal(result.summary.total, 3);
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.coverage.sourceExhausted, true);
+  assert.equal(result.coverage.firstMeasuredAt, '2000-01-01T00:00:00+08:00');
+  assert.match(result.coverage.note, /不足指定数量/);
+  const capped = setup({ rows: Array.from({ length: 205 }, (_, i) => record(i)), config: { vision: { mes: { maxPages: 1 } } } });
+  const partial = await capped.service.read(query({ queryMode: 'count', limit: 500 }), SESSION);
+  assert.equal(partial.coverage.complete, false);
+  assert.equal(partial.coverage.sourceExhausted, false);
+  assert.equal(partial.summary.passRate, null);
+});
+
+test('empty count history is complete with null sample dates while invalid modes or counts never read', async () => {
+  const empty = setup({ rows: [] });
+  const result = await empty.service.read(query({ queryMode: 'count', limit: 1 }), SESSION);
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.coverage.sourceExhausted, true);
+  assert.equal(result.coverage.firstMeasuredAt, null);
+  assert.equal(result.coverage.lastMeasuredAt, null);
+  const { service, calls } = setup();
+  for (const invalid of [{ queryMode: 'count', limit: 0 }, { queryMode: 'count' }, { queryMode: 'count', limit: 20001 },
+    { queryMode: 'both' }, { queryMode: true }, { queryMode: ['time'] }]) {
+    await rejectsStatus(service.read(query(invalid), SESSION), 400);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test('legacy callers retain combined date and recent filtering when queryMode is absent', async () => {
+  const { service } = setup({ rows: [record(0), record(1)] });
+  const result = await service.read(query({ limit: 1 }), SESSION);
+  assert.equal(Object.hasOwn(result.filters, 'queryMode'), false);
+  assert.equal(result.filters.start, '2026-02-03 00:00:00');
+  assert.equal(result.filters.limit, 1);
+  assert.equal(result.summary.total, 1);
+});
+
+test('production line decoding uses only the two digits in the final A or B production marker', async () => {
+  const samples = [
+    ['SYN2628911A140', '11'], ['SYN2628911B001', '11'], ['SYN2628912A998', '12'],
+    ['SYN2628912b7', '12'], ['SYN2628921A101', '21'], ['SYN2628999B010', '99'],
+    ['SYN2628901A001', '1'], ['SYN2628900A001', 'unknown'], ['SYN11A140-middle', 'unknown'],
+    ['SYN11C140', 'unknown'], ['SYN11A', 'unknown'], ['SYN7A140', 'unknown'],
+    ['SYN11A140-NOT-PRODUCTION', 'unknown'], ['SYN-NO-MARKER', 'unknown'],
+  ];
+  const { service } = setup({ rows: samples.map(([barCode], i) => record(i, { barCode })) });
+  const result = await service.read(query(), SESSION);
+  assert.deepEqual(result.records.map(row => row.productionLine), samples.map(([, line]) => line));
+  assert.equal(result.coverage.complete, true, 'unknown SN line identity does not invent an unknown inspection verdict');
+});
+
+test('material-line facets separate the same material by production line before local filters', async () => {
+  const rows = [record(0, { barCode: 'SYN2628911A001' }), record(1, { barCode: 'SYN2628911B001' }),
+    record(2, { barCode: 'SYN2628912A001' }), record(3, { barCode: 'SYN-UNKNOWN' }),
+    record(4, { barCode: 'SYN2628911A002', itemCode: 'OTHER_PART', itemName: '其他合成物料' })];
+  const { service } = setup({ rows });
+  const result = await service.read(query({ partCode: 'PART_TEST', productionLine: '11' }), SESSION);
+  assert.deepEqual(result.records.map(row => row.recordId), ['1', '2']);
+  assert.equal(result.filters.productionLine, '11');
+  assert.equal(result.summary.total, 2);
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.facets.parts.length, 2);
+  assert.deepEqual(result.facets.materialLines.map(({ code, productionLine }) => [code, productionLine]), [
+    ['OTHER_PART', '11'], ['PART_TEST', '11'], ['PART_TEST', '12'], ['PART_TEST', 'unknown'],
+  ]);
+  const unknown = await service.read(query({ productionLine: 'unknown' }), SESSION);
+  assert.deepEqual(unknown.records.map(row => row.recordId), ['4']);
+  assert.equal(unknown.summary.total, 1);
+  assert.equal(unknown.coverage.complete, true);
+});
+
+test('production-line and material filtering happen before recent selection across old dates and pages', async () => {
+  const rows = Array.from({ length: 425 }, (_, i) => record(i, { barCode: `SYN2628912A${i}`,
+    endTime: new Date(NOW - i * 3600000 - 60000).toISOString() }));
+  rows[210].barCode = 'SYN2628911A001'; rows[320].barCode = 'SYN2628911B002'; rows[410].barCode = 'SYN2628911B003';
+  const { service, calls } = setup({ rows });
+  const result = await service.read(query({ queryMode: 'count', limit: 2, partCode: 'PART_TEST', productionLine: '11' }), SESSION);
+  assert.deepEqual(result.records.map(row => row.recordId), ['211', '321']);
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.coverage.readRows, 400);
+  assert.equal(result.summary.denominator, 2);
+  assert.ok(result.coverage.firstMeasuredAt.startsWith('2026-01-'));
+  assert.deepEqual(calls.filter(c => c.path === REPORT).map(c => c.query.page), [1, 2, 1]);
+  assert.ok(calls.filter(c => c.path === REPORT).every(c => !Object.hasOwn(c.query, 'productionLine') && !Object.hasOwn(c.query, 'queryMode')));
+});
+
+test('unsupported production line selectors are rejected before upstream reads', async () => {
+  const { service, calls } = setup();
+  for (const productionLine of ['0', '00', '100', '11A', '11线', 'UNKNOWN', true, [], {}]) {
+    await rejectsStatus(service.read(query({ productionLine }), SESSION), 400);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test('local catalog excludes only the requested phase-four front and rear dimensional names', async () => {
+  const lines = [
+    { value: 1, label: 'SYN1-TSL四期前副在线尺寸检测' }, { value: 2, label: 'SYN2-TSL四期后副在线尺寸检测' },
+    { value: 3, label: 'SYN3-TSL四期前幅在线尺寸检测' }, { value: 4, label: 'SYN4-TSL四期后幅在线尺寸检测' },
+    { value: 5, label: 'SYN5-TSL七期前副在线尺寸检测' }, { value: 6, label: 'SYN6-TSL四期其他尺寸检测' },
+    { value: 7, label: 'SYN7-其他公司四期前副在线尺寸检测' },
+  ];
+  const { service, calls } = setup({ lines, config: { vision: { mes: { defaultLineId: '1' } } } });
+  const catalog = await service.read({ action: 'catalog' }, SESSION);
+  assert.deepEqual(catalog.lines.map(row => row.id), ['5', '6', '7']);
+  assert.equal(catalog.defaultLineId, '5');
+  for (const lineId of ['1', '2', '3', '4']) await rejectsStatus(service.read(query({ lineId }), SESSION), 400);
+  assert.equal(calls.filter(c => c.path === REPORT).length, 0, 'excluded IDs cannot bypass the local catalog to query company reports');
 });

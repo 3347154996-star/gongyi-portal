@@ -9,20 +9,24 @@
   <link rel="stylesheet" href="inventory.css?v=20261015">
   <link rel="stylesheet" href="vision.css?v=20261015">
   <link rel="stylesheet" href="vision-mes.css?v=20261016">
-  <link rel="stylesheet" href="vision-mes-report.css?v=20261016">
+  <link rel="stylesheet" href="vision-mes-report.css?v=20261018-modes-lines">
   <link rel="stylesheet" href="tools.css?v=20261015">
   <link rel="stylesheet" href="penetration.css?v=20261016">
   <link rel="stylesheet" href="settings.css?v=20261016">
   <link rel="stylesheet" href="portal-theme.css?v=20261015">
+  <link rel="stylesheet" href="shared-filter.css?v=20261018">
+  <link rel="stylesheet" href="one-page-report.css?v=20261018">
   <script src="vendor/jsQR.js" defer></script>
   <script src="vendor/qrcode.js" defer></script>
   <script src="vendor/qrcode_UTF8.js" defer></script>
   <script src="workbench-utils.js?v=20261015" defer></script>
   <script src="company-calendar.js?v=20261016" defer></script>
+  <script src="shared-filter.js?v=20261018" defer></script>
+  <script src="portal-preferences.js?v=20261018" defer></script>
+  <script src="one-page-report.js?v=20261018-mes-report" defer></script>
   <script src="inventory.js?v=20261015" defer></script>
-  <script src="vision.js?v=20261015" defer></script>
   <script src="vision-mes.js?v=20261016" defer></script>
-  <script src="vision-mes-report.js?v=20261016" defer></script>
+  <script src="vision-mes-report.js?v=20261018-modes-lines" defer></script>
   <script src="portal-state.js?v=20261015" defer></script>
   <script src="tools.js?v=20261015" defer></script>
   <script src="penetration.js?v=20261016" defer></script>
@@ -62,6 +66,7 @@
       <section id="settingsWorkbench" class="settings-workbench" aria-label="门户设置" hidden></section>
       <section id="penetrationWorkbench" class="penetration-workbench" aria-label="熔深合格率工作台" hidden></section>
       <div id="sourceStatusLine" class="source-status-line" role="status"><span class="source-status-dot" aria-hidden="true"></span><span id="sourceStatusText">正在检查数据源状态…</span></div>
+      <section id="visionWorkbench" class="vision-workbench" aria-label="视觉检具公司检测数据" hidden></section>
       <section class="filter-panel" aria-label="查询条件">
         <form id="queryForm" class="query-form">
           <label class="field" id="rangeModeField"><span>时间方式</span><select id="rangeMode"><option value="today">今天</option><option value="custom">自选日期</option></select></label>

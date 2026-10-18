@@ -42,81 +42,26 @@ async function fixture(t,hooks={}){
   return {request,login,admin,member:await login('00002'),reviewer:await login('00003'),calls,visionService,server};
 }
 
-test('vision synchronization starts on listening and stops on close, independently of queries',async t=>{
+
+test('company-only portal never starts, reads or stops the retired file collector',async t=>{
   let starts=0,stops=0;
   const app=await fixture(t,{start(){starts++;},stop(){stops++;}});
-  assert.equal(starts,1);assert.equal(stops,0);
-  assert.equal(app.calls.report.length,0);
-  await app.request('GET','/local/vision/report',undefined,app.member);
-  assert.equal(starts,1);
+  assert.equal(starts,0);
+  for(const cookie of [app.admin,app.member,app.reviewer]){
+    for(const [method,route,data] of [['GET','/local/vision/report'],['GET','/local/vision/records/'+recordId],['POST','/local/vision/import',{filename:'synthetic.csv',content:'synthetic'}]]){
+      const result=await app.request(method,route,data,cookie);
+      assert.equal(result.status,410);assert.match(result.body.message,/公司系统/);
+    }
+  }
   app.server.closeAllConnections();await new Promise(resolve=>app.server.close(resolve));
-  assert.equal(stops,1);
+  assert.equal(stops,0);
+  assert.deepEqual(app.calls,{report:[],detail:[],import:[],source:0,credentials:0});
 });
-
-test('vision report, detail and import require a current portal session',async t=>{
+test('retired inspection endpoints still require login and reject foreign origins',async t=>{
   const app=await fixture(t);
-  for(const [method,route,data] of [['GET','/local/vision/report'],['GET',`/local/vision/records/${recordId}`],['POST','/local/vision/import',{filename:'Tesla_Front12_20261013-000549.csv',content:'synthetic',deviceId:'fixture-machine'}]]){
+  for(const [method,route,data] of [['GET','/local/vision/report'],['GET','/local/vision/records/'+recordId],['POST','/local/vision/import',{}]]){
     assert.equal((await app.request(method,route,data)).status,401);
+    assert.equal((await app.request(method,route,data,app.admin,{Origin:'https://foreign.invalid'})).status,403);
   }
   assert.deepEqual(app.calls,{report:[],detail:[],import:[],source:0,credentials:0});
-});
-
-test('members can query visual inspection records without company-system credentials',async t=>{
-  const app=await fixture(t);
-  const query={start:'2026-10-01',end:'2026-10-13',part:'Tesla_Front12',result:'NG',search:'测试 SN',page:'2',pageSize:'20'};
-  const report=await app.request('GET',`/local/vision/report?${new URLSearchParams(query)}`,undefined,app.member);
-  assert.equal(report.status,200);assert.equal(report.body.records[0].id,recordId);
-  assert.deepEqual(app.calls.report,[query]);
-  const detail=await app.request('GET',`/local/vision/records/${recordId}`,undefined,app.member);
-  assert.equal(detail.status,200);assert.equal(detail.body.measurements[0].name,'测试测点');
-  assert.deepEqual(app.calls.detail,[recordId]);
-  assert.equal(app.calls.source,0);assert.equal(app.calls.credentials,0);
-});
-
-test('only an administrator may import inspection CSV, with the original payload preserved',async t=>{
-  const app=await fixture(t);
-  const input={filename:'Tesla_Front12_20261013-000549.csv',content:'PartName,Tesla_Front12\r\nSN,合成样例\r\n',deviceId:'fixture-machine'};
-  for(const cookie of [app.member,app.reviewer])assert.equal((await app.request('POST','/local/vision/import',input,cookie)).status,403);
-  assert.equal(app.calls.import.length,0);
-  const result=await app.request('POST','/local/vision/import',input,app.admin);
-  assert.equal(result.status,200);assert.equal(result.body.imported,1);
-  assert.deepEqual(app.calls.import,[input]);
-  assert.equal(app.calls.source,0);assert.equal(app.calls.credentials,0);
-});
-
-test('vision routes reject foreign-origin requests before calling the inspection service',async t=>{
-  const app=await fixture(t);
-  const headers={Origin:'https://foreign-origin.invalid'};
-  for(const [method,route,data] of [['GET','/local/vision/report'],['GET',`/local/vision/records/${recordId}`],['POST','/local/vision/import',{filename:'fixture.csv',content:'fixture',deviceId:'fixture-machine'}]]){
-    assert.equal((await app.request(method,route,data,app.admin,headers)).status,403);
-  }
-  assert.deepEqual(app.calls,{report:[],detail:[],import:[],source:0,credentials:0});
-});
-
-test('logout and member deactivation revoke access to visual inspection records',async t=>{
-  const app=await fixture(t);
-  assert.equal((await app.request('POST','/local/logout',{},app.member)).status,200);
-  assert.equal((await app.request('GET','/local/vision/report',undefined,app.member)).status,401);
-  assert.equal((await app.request('GET',`/local/vision/records/${recordId}`,undefined,app.member)).status,401);
-  const freshMember=await app.login('00002');
-  const members=(await app.request('GET','/local/members',undefined,app.admin)).body.members;
-  const member=members.find(item=>item.account==='00002');
-  assert.equal((await app.request('POST','/local/members',{...member,active:false},app.admin)).status,200);
-  assert.equal((await app.request('GET','/local/vision/report',undefined,freshMember)).status,401);
-  assert.equal((await app.request('GET',`/local/vision/records/${recordId}`,undefined,freshMember)).status,401);
-  assert.deepEqual(app.calls,{report:[],detail:[],import:[],source:0,credentials:0});
-});
-
-test('a pending visual inspection read cannot reveal records after logout',async t=>{
-  const app=await fixture(t);
-  let started,finish;
-  const called=new Promise(resolve=>{started=resolve;});
-  const gate=new Promise(resolve=>{finish=resolve;});
-  app.visionService.report=async()=>{started();await gate;return {records:[{id:recordId}]};};
-  const pending=app.request('GET','/local/vision/report',undefined,app.member);
-  await called;
-  try{assert.equal((await app.request('POST','/local/logout',{},app.member)).status,200);}finally{finish();}
-  const result=await pending;
-  assert.equal(result.status,401);
-  assert.equal(result.body.records,undefined);
 });

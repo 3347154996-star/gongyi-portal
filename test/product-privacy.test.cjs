@@ -165,7 +165,7 @@ test('portal JSON boundary aliases catalog and report data and restores business
   const sourceData = { rows: [{ item_name: MODEL, count: 3 }], filters: { materialNames: [{ value: 'all', label: '全部物料' }, { value: MODEL, label: MODEL }] }, description: '检查 ' + MODEL }, original = structuredClone(sourceData);
   const fleet = { lines: [{ id: 'line-1', name: MODEL + ' 线' }], devices: [{ id: 'device-1', name: MODEL + ' 检具', lineName: MODEL + ' 线', partNames: [MODEL], sourcePath: '/synthetic/' + MODEL + '/input.json' }] };
   const start = async () => {
-    const server = createPortal({ root, config, source: {}, autoSource: { start() {}, stop() {}, status: () => ({ state: 'ready' }), async read(module, query) { queries.push({ module, query: structuredClone(query) }); return sourceData; } },
+    const server = createPortal({ root, config, source: {}, autoSource: { start() {}, stop() {}, status: () => ({ state: 'ready' }), async read(module, query) { queries.push({ module, query: structuredClone(query) }); if(module==='visionMesReport')return query.action==='catalog'?fleet:{records:[{partName:MODEL}],filters:{partCode:query.partCode}}; return sourceData; } },
       inventoryService: { async capabilities() { return {}; }, async catalog(query) { queries.push({ module: 'inventory', query }); return { items: [{ id: MODEL + '-item', name: MODEL }] }; }, async transact(input) { queries.push({ module: 'transact', input }); return { status: 'applied' }; }, async count(input) { queries.push({ module: 'count', input }); return { status: 'pending' }; }, async review(input) { queries.push({ module: 'review', input }); return { status: 'applied' }; } },
       visionService: { async catalog() { return fleet; }, async report(query) { queries.push({ module: 'vision', query }); return { records: [{ partName: MODEL }], filters: { parts: [MODEL] } }; } } });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -180,10 +180,10 @@ test('portal JSON boundary aliases catalog and report data and restores business
   };
   const first = await start(), report = await first.get('/local/data/weld?start=2026-10-02&end=2026-10-08'); noNames(report, [MODEL]);
   const code = report.filters.materialNames[1].value; assert.match(code, /^P-[A-F0-9]{16}$/);
-  noNames(await first.get('/local/vision/catalog'), [MODEL]);
+  noNames(await first.get('/local/vision/mes/catalog'), [MODEL]);
   await first.get('/local/data/weld?start=2026-10-02&end=2026-10-08&materialName=' + code + '&keyword=' + code);
   assert.equal(queries.at(-1).query.materialName, MODEL); assert.equal(queries.at(-1).query.keyword, MODEL);
-  await first.get('/local/vision/report?part=' + code); assert.equal(queries.at(-1).query.part, MODEL);
+  await first.get('/local/vision/mes/report?partCode=' + code); assert.equal(queries.at(-1).query.partCode, MODEL);
   const stock = await first.get('/local/inventory/catalog?search=' + code); assert.equal(queries.at(-1).query.search, MODEL);
   await first.post('/local/inventory/transactions',{itemId:stock.items[0].id,kind:'inbound'}); assert.equal(queries.at(-1).input.itemId,MODEL+'-item');
   await first.post('/local/inventory/counts',{itemId:stock.items[0].id}); assert.equal(queries.at(-1).input.itemId,MODEL+'-item');
@@ -196,9 +196,9 @@ test('portal JSON boundary aliases catalog and report data and restores business
   const named=await originalMode.get('/local/data/weld?start=2026-10-02&end=2026-10-08&materialName='+code);
   assert.deepEqual(named.rows,sourceData.rows);assert.equal(named.filters.materialNames[1].value,MODEL);
   assert.equal(named.resolvedQuery.materialName,MODEL);assert.equal(queries.at(-1).query.materialName,MODEL);
-  assert.deepEqual(await originalMode.get('/local/vision/catalog'),fleet);
-  const namedVision=await originalMode.get('/local/vision/report?part='+code);
-  assert.equal(namedVision.records[0].partName,MODEL);assert.equal(namedVision.resolvedFilters.part,MODEL);
+  assert.deepEqual(await originalMode.get('/local/vision/mes/catalog'),fleet);
+  const namedVision=await originalMode.get('/local/vision/mes/report?partCode='+code);
+  assert.equal(namedVision.records[0].partName,MODEL);assert.equal(namedVision.filters.partCode,MODEL);
   const namedStock=await originalMode.get('/local/inventory/catalog?search='+code);
   assert.equal(namedStock.items[0].name,MODEL);assert.equal(queries.at(-1).query.search,MODEL);
 });

@@ -81,7 +81,7 @@ test('a pending company lookup cannot return measurements after portal logout',a
 test('MES catalog, report and record detail require portal login and map to the batch source with exact string parameters',async t=>{
   const app=await fixture(t);
   const recordId='123456789012345678';
-  const reportQuery={lineId:'123',start:'2026-02-03T08:01',end:'2026-02-03T09:02',limit:'500',barcode:'SYN-001'};
+  const reportQuery={queryMode:'count',lineId:'123',start:'2026-02-03T08:01',end:'2026-02-03T09:02',limit:'573',barcode:'SYN-001',partCode:'PART-SYN',productionLine:'12',deviceCode:'DEVICE-SYN',result:'NG'};
   const routes=['/local/vision/mes/catalog',
     '/local/vision/mes/report?'+new URLSearchParams(reportQuery),
     '/local/vision/mes/detail?recordId='+recordId];
@@ -105,6 +105,18 @@ test('MES catalog, report and record detail require portal login and map to the 
     {module:'visionMesReport',query:{action:'report',...reportQuery}},
     {module:'visionMesReport',query:{action:'detail',recordId}},
   ]);
+});
+
+test('MES quantity and time selectors are forwarded independently',async t=>{
+  const app=await fixture(t);
+  for(const query of [
+    {queryMode:'count',lineId:'123',limit:'500'},
+    {queryMode:'time',lineId:'123',start:'2026-02-03T08:01',end:'2026-02-03T09:02'}
+  ]) {
+    const response=await app.request('/local/vision/mes/report?'+new URLSearchParams(query),{cookie:app.member});
+    assert.equal(response.status,200);
+    assert.deepEqual(app.calls.at(-1),{module:'visionMesReport',query:{action:'report',...query}});
+  }
 });
 
 test('every batch MES route rejects writes and cross-site access before source reads',async t=>{
@@ -137,8 +149,8 @@ test('batch MES parameter allowlists reject extra fields and every duplicated se
     '/local/vision/mes/detail?recordId=456&recordId=456',
     '/local/vision/mes/detail?recordId=456&recordId=789',
   ];
-  for(const [key,value] of Object.entries({lineId:'123',start:'2026-02-03',end:'2026-02-04',limit:'500',barcode:'SYN-001'})){
-    const query=new URLSearchParams({lineId:'123',start:'2026-02-03',end:'2026-02-04',limit:'500',barcode:'SYN-001'});
+  for(const [key,value] of Object.entries({queryMode:'count',lineId:'123',start:'2026-02-03',end:'2026-02-04',limit:'573',barcode:'SYN-001',partCode:'PART-SYN',productionLine:'12',deviceCode:'DEVICE-SYN',result:'NG'})){
+    const query=new URLSearchParams({queryMode:'count',lineId:'123',start:'2026-02-03',end:'2026-02-04',limit:'573',barcode:'SYN-001',partCode:'PART-SYN',productionLine:'12',deviceCode:'DEVICE-SYN',result:'NG'});
     query.append(key,value);
     invalidRoutes.push('/local/vision/mes/report?'+query);
   }

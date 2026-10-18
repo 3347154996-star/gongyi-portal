@@ -7,7 +7,6 @@ const crypto=require('node:crypto');
 const {createSource,parseQuery,PortalError}=require('./lib/source.cjs');
 const {createMemberStore}=require('./lib/members.cjs');
 const {createInventoryService}=require('./lib/inventory.cjs');
-const {createVisionService}=require('./lib/vision.cjs');
 const {createCredentialStore}=require('./lib/credential-store.cjs');
 const {createAutoSource}=require('./lib/auto-source.cjs');
 const {createToolsService}=require('./lib/tools.cjs');
@@ -25,7 +24,6 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
   const members=memberStore||createMemberStore({root,admin:config.admin,now});
   function authorizeActor(actor,{review=false}={}){const current=members.get(actor.account);if(!current?.active||current.version!==actor.version)throw new PortalError('成员权限或登录状态已改变，请重新登录。',401);if(review&&!['admin','reviewer'].includes(current.role))throw new PortalError('只有指定复核人员可以复核盘点。',403);return current;}
   const inventory=inventoryService||createInventoryService({root,source:dataService,now,authorizeActor});
-  const vision=visionService||createVisionService({root,config,now});
   const toolService=createToolsService();
   const privacy=createProductPrivacy({root,config});
   const json=(res,status,data,headers={})=>{try{return writeJson(res,status,privacy.protect(data),headers);}catch(_){return writeJson(res,503,{message:'产品名称配置暂不可用，已停止返回业务数据。'});}};
@@ -87,7 +85,7 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
         if(mesVisionRoute){
           if(req.method!=='GET')throw new PortalError('公司尺寸查询仅支持读取。',405);
           const action=mesVisionRoute[1];
-          const allowed=new Set(action==='catalog'?[]:action==='report'?['lineId','start','end','limit','barcode']:action==='detail'?['recordId']:['barcode','processId']);
+          const allowed=new Set(action==='catalog'?[]:action==='report'?['queryMode','lineId','start','end','limit','barcode','partCode','productionLine','deviceCode','result']:action==='detail'?['recordId']:['barcode','processId']);
           for(const key of url.searchParams.keys())if(!allowed.has(key)||url.searchParams.getAll(key).length!==1)throw new PortalError('尺寸查询条件无效。',400);
           const isLookup=['processes','lookup'].includes(action);
           const query=privacy.restore(isLookup?{action,barcode:url.searchParams.get('barcode')||'',processId:url.searchParams.get('processId')||''}:{action,...Object.fromEntries(url.searchParams)});
@@ -95,37 +93,8 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
           if(!getSession(req))throw new PortalError('会话已退出，请重新登录。',401);
           return json(res,200,result);
         }
-        if(req.method==='GET'&&url.pathname==='/local/vision/catalog'){
-          const result=await vision.catalog();
-          if(!getSession(req))throw new PortalError('会话已退出，请重新登录。',401);
-          return json(res,200,result);
-        }
-        if(req.method==='POST'&&url.pathname==='/local/vision/catalog'){
-          if(session.role!=='admin')throw new PortalError('只有管理员可以登记检具。',403);
-          const input=await body(req);
-          if(getSession(req)?.role!=='admin')throw new PortalError('管理员权限已改变，请重新登录。',401);
-          const result=await vision.saveDraft(privacy.restore(input));
-          if(getSession(req)?.role!=='admin')throw new PortalError('会话已改变，请重新登录后核对登记结果。',401);
-          return json(res,200,result);
-        }
-        if(req.method==='GET'&&url.pathname==='/local/vision/report'){
-          const resolvedFilters=privacy.restore(Object.fromEntries(url.searchParams));
-          const result=await vision.report(resolvedFilters);
-          if(!getSession(req))throw new PortalError('会话已退出，请重新登录。',401);
-          return json(res,200,{...result,resolvedFilters});
-        }
-        const visionRecord=/^\/local\/vision\/records\/([a-f0-9]{64})$/.exec(url.pathname);
-        if(req.method==='GET'&&visionRecord){
-          const result=await vision.detail(visionRecord[1]);
-          if(!getSession(req))throw new PortalError('会话已退出，请重新登录。',401);
-          return json(res,200,result);
-        }
-        if(req.method==='POST'&&url.pathname==='/local/vision/import'){
-          if(session.role!=='admin')throw new PortalError('只有管理员可以导入检具记录。',403);
-          const input=await body(req);
-          if(getSession(req)?.role!=='admin')throw new PortalError('管理员权限已改变，请重新登录。',401);
-          const result=await vision.importCsv(input);
-          return json(res,200,result);
+        if(/^\/local\/vision\/(?:catalog|report|import|records(?:\/.*)?)$/.test(url.pathname)){
+          throw new PortalError('采集文件入口已停用，请使用公司系统的尺寸检测查询。',410);
         }
         if(url.pathname==='/local/members'){
           if(session.role!=='admin')throw new PortalError('只有管理员可以管理工艺部成员。',403);
@@ -186,8 +155,8 @@ function createPortal({config=loadConfig(),source,credentialStore,autoSource,mem
     }catch(error){if(!res.headersSent)json(res,error.status||500,{message:error.status?error.message:'本地服务暂时无法完成此操作，请重试。',code:error.code,recordId:error.recordId,outcome:error.outcome,sourceStatus:dataService.status()});else res.end();}
   };
   const server=tls?https.createServer(tls,handler):http.createServer(handler);
-  server.on('listening',()=>{ void vision.start?.();void penetration.start?.(); });
-  server.on('close',()=>{ vision.stop?.();penetration.stop?.();dataService.stop(); });
+  server.on('listening',()=>{void penetration.start?.(); });
+  server.on('close',()=>{penetration.stop?.();dataService.stop(); });
   server.requestTimeout=65000;server.headersTimeout=15000;
   return server;
 }

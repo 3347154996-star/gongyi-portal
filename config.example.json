@@ -7,11 +7,7 @@
     "mes": {
       "defaultLineId": "",
       "maxPages": 150
-    },
-    "dataFile": "runtime/vision-input.json",
-    "maxScanAgeSeconds": 7200,
-    "pollIntervalSeconds": 30,
-    "readTimeoutMs": 10000
+    }
   },
   "maxPages": 50,
   "language": "0",
