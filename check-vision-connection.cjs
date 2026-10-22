@@ -6,7 +6,12 @@ const { validateVisionSnapshot } = require('./lib/vision.cjs');
 
 async function checkVisionConnection({ root = __dirname, config = {}, env = process.env, now = Date.now, sourceReader } = {}) {
   const source = sourceReader || createVisionSource({ root, config, env });
-  const result = { scope: '仅验证当前进程账号的读取能力，不代表其他服务账号或现场历史完整性。', source: source.describe?.() || { kind: 'file' } };
+  const result = {
+    mode: 'legacy-file',
+    mesVerified: false,
+    scope: '仅验证历史采集文件及当前进程账号的读取能力；不验证 MES 连接、权限或数据完整性，当前门户不读取此文件。',
+    source: source.describe?.() || { kind: 'file' },
+  };
   let document;
   try { document = await source.read(); }
   catch (error) {
@@ -35,16 +40,19 @@ async function checkVisionConnection({ root = __dirname, config = {}, env = proc
 }
 
 async function main() {
-  if (process.argv.length > 2) {
-    if (process.argv.length === 3 && process.argv[2] === '--help') {
-      process.stdout.write('npm run vision:check\n读取本机 config.local.json；PORTAL_VISION_DATA_FILE 可覆盖来源路径。\n请用实际运行门户的系统账号执行。只读自检，不导入记录、不修改共享或配置。\n');
-      return;
-    }
-    throw new Error('请使用 npm run vision:check；不需要在命令中提供共享密码。');
+  const args = process.argv.slice(2);
+  const notice = '此工具仅用于历史文件采集方案，不验证 MES；当前门户使用公司 MES 查询。MES 验证请按 docs/公司尺寸接口接入.md 执行。';
+  if ((args.length === 1 && args[0] === '--help') || (args.length === 2 && args[0] === '--legacy' && args[1] === '--help')) {
+    process.stdout.write(notice + '\n历史维护命令：npm run vision:check:legacy（或 npm run vision:check -- --legacy）。\n显式启用后读取本机 config.local.json；PORTAL_VISION_DATA_FILE 可覆盖历史来源路径。\n请用历史采集任务实际运行的系统账号执行。只读自检，不导入记录、不修改共享或配置。\n');
+    return;
+  }
+  // Require an explicit mode before reading config or touching a legacy share.
+  if (args.length !== 1 || args[0] !== '--legacy') {
+    throw new Error('VISION_LEGACY_CHECK_ONLY: ' + notice + '\n如确需检查历史采集文件，请运行 npm run vision:check:legacy；不在命令中提供共享密码。');
   }
   let config;
   try { config = JSON.parse((await fs.readFile(path.join(__dirname, 'config.local.json'), 'utf8')).replace(/^\uFEFF/, '')); }
-  catch (_) { throw new Error('本机 config.local.json 缺失或格式无效，请先完成部署配置。'); }
+  catch (_) { throw new Error('历史文件检查所需的本机 config.local.json 缺失或格式无效；这不是 MES 连接检查结果。'); }
   const result = await checkVisionConnection({ config });
   // Exit after flushing: an OS-level share read can remain pending after our
   // deadline. This one-shot, read-only command must still finish on timeout.
